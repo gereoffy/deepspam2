@@ -1,6 +1,7 @@
 
 import codecs
 import email
+import email.policy
 import re
 
 def mixed_decoder(unicode_error):
@@ -399,10 +400,57 @@ def eml2str(msg):
   return text
 
 
+def get_mimedata(eml):
+    mimeinfo=["RAW message: %d bytes"%(len(eml))]
+    mimedata=[eml]
+    msg = email.message_from_bytes(eml, policy=email.policy.default)
+    def walker(msg,level=0):
+#        print(" "*(level*3), msg.is_multipart(), msg.get_content_type(), msg.get_content_charset(), msg.is_attachment(), msg.get_filename())
+#        s=" "*(level*3) + "Multi:"+str(msg.is_multipart())+"  "+str(msg.get_content_type())
+        ctyp=msg.get_content_type()
+        cset=msg.get_content_charset()
+        s=" "*(level*3) + str(ctyp)
+        if cset: s+="["+str(cset)+"]"
+        raw=msg.as_bytes()
+        s+=" (%d) "%(len(raw))
+        pay=msg.get_payload(decode=True)
+        if pay:
+            s+="%d"%(len(pay))
+            if cset and cset.lower()!="utf-8":
+                pay=pay.decode(cset,errors="ignore").encode("utf-8")
+                s+=" {%d}"%(len(pay))
+        mimeinfo.append(s)
+
+        if msg.get_filename():
+            mimedata.append(raw)
+            s=" "*(level*3+3)
+            s+="Attach: " if msg.is_attachment() else "Inline: "
+            s+=msg.get_filename()
+            mimeinfo.append(s)
+        mimedata.append(pay if pay else raw)
+
+        #if ctyp=="text/html" or ctyp=="text/xml"
+
+        for subpart in msg.iter_parts():  # policy=email.policy.default
+            walker(subpart,level+1)
+
+#        if msg.is_multipart():
+#            for subpart in msg.get_payload(): # policy=email.policy.compat32
+#                walker(subpart,level+1)
+    walker(msg)
+    return mimeinfo,mimedata
+4
+
 if __name__ == "__main__":
-    s='&nbsp;&nbsp; Elküldve: 2023. május 31. 13:06:16 (UTC&#43;01:00) Belgrád, Budapest, Ljubljana, Pozsony, Prága<br>'
-    print(s)
-    print(xmldecode(s))
-    print(html_unescape(s))
+#    s='&nbsp;&nbsp; Elküldve: 2023. május 31. 13:06:16 (UTC&#43;01:00) Belgrád, Budapest, Ljubljana, Pozsony, Prága<br>'
+#    print(s)
+#    print(xmldecode(s))
+#    print(html_unescape(s))
     
-    print(eml2str(open("test.eml","rb").read()))
+#    print(eml2str(open("test.eml","rb").read()))
+    print(get_mimedata(open("test.eml","rb").read())[0])
+
+#    msg = email.message_from_bytes(open("test.eml","rb").read(), policy=email.policy.default)
+#    print(type(msg))
+#    help(msg)
+
