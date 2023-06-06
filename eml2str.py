@@ -3,6 +3,7 @@ import codecs
 import email
 import email.policy
 import re
+from bs4 import BeautifulSoup
 
 def mixed_decoder(unicode_error):
     position = unicode_error.start
@@ -414,13 +415,18 @@ def get_mimedata(eml):
         raw=msg.as_bytes()
         s+=" (%d) "%(len(raw))
         pay=msg.get_payload(decode=True)
+        soup=None
         if pay:
             s+="%d"%(len(pay))
             if cset and cset.lower()!="utf-8":
                 pay=pay.decode(cset,errors="ignore").encode("utf-8")
                 s+=" {%d}"%(len(pay))
+            if ctyp=="text/html" or ctyp=="text/xml":
+                soup=BeautifulSoup(pay,features="lxml")
+                pay=soup.prettify(encoding="utf-8")
         mimeinfo.append(s)
 
+        # Attachment file:
         if msg.get_filename():
             mimedata.append(raw)
             s=" "*(level*3+3)
@@ -429,7 +435,12 @@ def get_mimedata(eml):
             mimeinfo.append(s)
         mimedata.append(pay if pay else raw)
 
-        #if ctyp=="text/html" or ctyp=="text/xml"
+        # HTML: add Extracted text
+        if soup:
+            pay=soup.get_text()
+            pay="\n".join([" ".join(s.split()) for s in pay.splitlines() if s]) # remove empty lines and redundant spaces
+            mimedata.append(pay.encode("utf-8",errors='xmlcharrefreplace'))
+            mimeinfo.append(" "*(level*3+3)+"Extracted text: "+str(len(pay)))
 
         for subpart in msg.iter_parts():  # policy=email.policy.default
             walker(subpart,level+1)
