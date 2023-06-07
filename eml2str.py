@@ -91,6 +91,9 @@ def html2text(data):
 #      print(ret.encode("utf-8"))
 #      break
 #    print("TAG: '%s'"%(tag))
+
+    if b'font-size:0' in tag: continue # HACK
+
     try:
       tag1=tag.split()[0].lower()
     except:
@@ -109,11 +112,16 @@ def html2text(data):
 #    print(text)
     if in_style<=0 and in_script<=0:
 #      if tag1 in ["p","span","div"]: print(tag.lower())
-      if tag1 in [b'p',b'br',b'td',b'div',b'li']: text+=b'\n'
+#      if tag1 in [b'p',b'br',b'td',b'div',b'li',b'pre',b'blockquote']: text+=b'\n'  # https://www.w3schools.com/html/html_blocks.asp
+      if tag1 in [b'p',b'br',b'br/',b'tr']: text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
+      else:
+        if tag1.startswith(b'/'): tag1=tag1[1:] # closing tag
+        if not tag1 in [b'span',b'a',b'b',b'i',b'u',b'em',b'strong',b'abbr']: text+=b' ' # not inline elements
 #      text+=txt.strip() # test/fixme
-      text+=b' '.join(txt.split()) # whitespace...
+#      text+=b' '.join(txt.split()) # whitespace...
+      text+=txt
 
-  return text
+  return (b' '.join(text.split())).replace(b'<BR>',b'\n')
 
 def decode_payload(data,ctyp="text/html",charset=None):
 
@@ -182,7 +190,7 @@ def get_mimedata(eml):
 #        s=" "*(level*3) + "Multi:"+str(msg.is_multipart())+"  "+str(msg.get_content_type())
         ctyp=msg.get_content_type()
         cset=msg.get_content_charset()
-        s=" "*(level*3) + str(ctyp)
+        s=" "*(level*3) + str(ctyp) # + str(msg.is_multipart())
         if cset: s+="["+str(cset)+"]"
         raw=msg.as_bytes()
         s+=" (%d) "%(len(raw))
@@ -191,12 +199,12 @@ def get_mimedata(eml):
         if pay:
             s+="%d"%(len(pay))
             if ctyp=="text/html" or ctyp=="text/xml":
-#                soup=BeautifulSoup(pay,features="lxml")
-#                soup=BeautifulSoup(pay,"html.parser")
-                soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
+                html=decode_payload(pay,ctyp,cset) # ez meg a soup-prettify elott kell, mert az elbassza a whitespacet...
+#                soup=BeautifulSoup(pay,features="lxml", from_encoding=cset)
+                soup=BeautifulSoup(pay,"html.parser")
+#                soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
                 pay=soup.prettify(encoding="utf-8")
 #                html=soup.get_text()
-                html=decode_payload(pay,ctyp,cset)
             elif cset and cset.lower()!="utf-8":   #  plaintext eseten itt kezeljuk a charset kerdest...
                 pay=pay.decode(cset,errors="ignore").encode("utf-8")
                 s+=" {%d}"%(len(pay))
@@ -217,8 +225,11 @@ def get_mimedata(eml):
             mimedata.append(pay.encode("utf-8",errors='xmlcharrefreplace'))
             mimeinfo.append(" "*(level*3+3)+"Extracted text: "+str(len(pay)))
 
-        for subpart in msg.iter_parts():  # policy=email.policy.default
-            walker(subpart,level+1)
+#        for subpart in msg.iter_parts():  # policy=email.policy.default
+#            walker(subpart,level+1)
+        if msg.is_multipart():
+            for subpart in msg.get_payload():  # az iter_parts() bugos, csak multipartra jo, message/rfc-re NEM!!!
+                walker(subpart,level+1)
 
 #        if msg.is_multipart():
 #            for subpart in msg.get_payload(): # policy=email.policy.compat32
@@ -240,6 +251,10 @@ if __name__ == "__main__":
 #    print(type(msg))
 #    help(msg)
 
-    print(parse_htmlhead(b'  <meta charset="utf-8"/>'))
+#    print(parse_htmlhead(b'  <meta charset="utf-8"/>'))
 #    print(parse_htmlhead(b'<meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>'))
+#    t=b'<p>Hello<em>World</em>!!! em</p>'
+    t=b'<p>Hello<i>World</em>!!! em</p>'
+    print(t)
+    print(html2text(t))
 
