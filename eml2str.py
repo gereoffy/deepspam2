@@ -93,11 +93,12 @@ def html2text(data):
 #    print("TAG: '%s'"%(tag))
 
     if b'font-size:0' in tag: continue # HACK
+    if b'FONT-SIZE: 0' in tag: continue # HACK
 
     try:
       tag1=tag.split()[0].lower()
     except:
-      print("TAG parse error: '%s'"%(str(tag)))
+#      print("TAG parse error: '%s'"%(str(tag)))
       tag1=""
 
     if tag1==b'style':
@@ -115,7 +116,8 @@ def html2text(data):
 #      if tag1 in [b'p',b'br',b'td',b'div',b'li',b'pre',b'blockquote']: text+=b'\n'  # https://www.w3schools.com/html/html_blocks.asp
       if tag1 in [b'p',b'br',b'br/',b'tr']: text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
       else:
-        if tag1.startswith(b'/'): tag1=tag1[1:] # closing tag
+#        if tag1.startswith(b'/'): tag1=tag1[1:] # closing tag
+        if tag1[:1]==b'/': tag1=tag1[1:] # closing tag
         if not tag1 in [b'span',b'a',b'b',b'i',b'u',b'em',b'strong',b'abbr']: text+=b' ' # not inline elements
 #      text+=txt.strip() # test/fixme
 #      text+=b' '.join(txt.split()) # whitespace...
