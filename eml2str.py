@@ -170,16 +170,15 @@ def eml2str(msg):
     disp=p.get_content_disposition()
 #    print((ctyp,charset,disp,fnev))
     if ctyp.split('/')[0]=="text" and disp!="attachment":
-#      print(ctyp)
-#      if ctyp.find("rfc")>=0:
-#        continue
-      try:
+#      try:
         data=p.get_payload(decode=True)
         data=decode_payload(data,ctyp,charset)
-        if len(data)>len(text): text=data
+        if not text or len(data)>20: text=data
+        if ctyp=="text/html" and len(text)>200: break
+#        if len(data)>len(text): text=data
 #        print(text)
-      except:
-        print(traceback.format_exc())
+#      except:
+#        print(traceback.format_exc())
   return text
 
 
