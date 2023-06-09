@@ -63,6 +63,7 @@ def parse_htmlhead(data,charset=None):
           if not c in b'-0123456789abcdefghijklmnopqrstuvwxyz': break
           charset+=chr(c)
 #        print('CHARSET='+charset)
+        if charset: break
   return charset
 
 
@@ -92,8 +93,19 @@ def html2text(data):
 #      break
 #    print("TAG: '%s'"%(tag))
 
-    if b'font-size:0' in tag: continue # HACK
-    if b'FONT-SIZE: 0' in tag: continue # HACK
+    tag=tag.lower()
+    if b'style' in tag: # detect hidden text!
+#  <span style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">
+#  <div style="display:none !important; font-size:1px; color:#f0f0f0; line-height:1px; font-family:arial,helvetica,sans-serif; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
+#  <div style="mso-hide:all; display:none!important; height:0; width:0px; max-height:0px; overflow:hidden; line-height:0px; float:left; font-size:0px;">
+#  Teams: <div itemprop="signedAdaptiveCard" style="mso-hide:all;display:none;max-height:0px;overflow:hidden;">eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsIng1YyI6Ik1JSUhIekND...
+        tag=tag.replace(b': ',b':')
+#        if b'font-size:0' in tag or b'display:none' in tag or b'max-height:0' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
+        if b'font-size:0px' in tag or b'display:none' in tag or b'max-height:0px' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
+            if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
+#            if len(txt.strip())>=5: text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
+            if len(txt.strip())>=10: text+=b'{{'+txt+b'}}' # hidden text
+            continue
 
     try:
       tag1=tag.split()[0].lower()
@@ -114,7 +126,7 @@ def html2text(data):
     if in_style<=0 and in_script<=0:
 #      if tag1 in ["p","span","div"]: print(tag.lower())
 #      if tag1 in [b'p',b'br',b'td',b'div',b'li',b'pre',b'blockquote']: text+=b'\n'  # https://www.w3schools.com/html/html_blocks.asp
-      if tag1 in [b'p',b'br',b'br/',b'tr']: text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
+      if tag==b'div' or tag1 in [b'p',b'br',b'br/',b'tr']: text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
       else:
 #        if tag1.startswith(b'/'): tag1=tag1[1:] # closing tag
         if tag1[:1]==b'/': tag1=tag1[1:] # closing tag
@@ -128,7 +140,7 @@ def html2text(data):
 def decode_payload(data,ctyp="text/html",charset=None):
 
     ldata=data.lower()
-    if ctyp=="text/html" or ctyp=="text/xml" or (data.find(b'<')>=0 and (ldata.find(b'<body')>=0 or ldata.find(b'<img')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<center')>=0 or ldata.find(b'<a href')>=0)):
+    if ctyp=="text/html" or ctyp=="text/xml" or (ctyp!="text/plain" and data.find(b'<')>=0 and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
         p=ldata.find(b'<body')
         if p>0:
             charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
@@ -199,16 +211,20 @@ def get_mimedata(eml):
         html=None
         if pay:
             s+="%d"%(len(pay))
-            if ctyp=="text/html" or ctyp=="text/xml":
+            if ctyp.startswith("text/"):
                 html=decode_payload(pay,ctyp,cset) # ez meg a soup-prettify elott kell, mert az elbassza a whitespacet...
+                if ctyp=="text/html" or ctyp=="text/xml":
+                    html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
 #                soup=BeautifulSoup(pay,features="lxml", from_encoding=cset)
-                soup=BeautifulSoup(pay,"html.parser")
-#                soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
-                pay=soup.prettify(encoding="utf-8")
+#                soup=BeautifulSoup(pay,"html.parser")
+                    soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
+                    pay=soup.prettify(encoding="utf-8")
 #                html=soup.get_text()
-            elif cset and cset.lower()!="utf-8":   #  plaintext eseten itt kezeljuk a charset kerdest...
-                pay=pay.decode(cset,errors="ignore").encode("utf-8")
-                s+=" {%d}"%(len(pay))
+#            elif cset and cset.lower()!="utf-8":   #  plaintext eseten itt kezeljuk a charset kerdest...
+#            else:
+#                pay=pay.decode(cset,errors="ignore").encode("utf-8")
+#                pay=decode_payload(pay,ctyp,cset).encode("utf-8",errors='xmlcharrefreplace') # plaintexthez is jo
+#                s+=" {%d}"%(len(pay))
         mimeinfo.append(s)
 
         # Attachment file:
@@ -222,9 +238,10 @@ def get_mimedata(eml):
 
         # HTML: add Extracted text
         if html:
-            pay="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
-            mimedata.append(pay.encode("utf-8",errors='xmlcharrefreplace'))
-            mimeinfo.append(" "*(level*3+3)+"Extracted text: "+str(len(pay)))
+            pay2=html.encode("utf-8",errors='xmlcharrefreplace')
+            if pay!=pay2:
+                mimedata.append(pay2)
+                mimeinfo.append(" "*(level*3+3)+"Extracted text: "+str(len(html))+"/"+str(len(pay2)))
 
 #        for subpart in msg.iter_parts():  # policy=email.policy.default
 #            walker(subpart,level+1)
