@@ -99,12 +99,22 @@ def html2text(data):
 #  <div style="display:none !important; font-size:1px; color:#f0f0f0; line-height:1px; font-family:arial,helvetica,sans-serif; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
 #  <div style="mso-hide:all; display:none!important; height:0; width:0px; max-height:0px; overflow:hidden; line-height:0px; float:left; font-size:0px;">
 #  Teams: <div itemprop="signedAdaptiveCard" style="mso-hide:all;display:none;max-height:0px;overflow:hidden;">eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsIng1YyI6Ik1JSUhIekND...
+# {{ uCteNf>}} Hell{{ Eywzmggb>}}o part{{ GYWmIbcB>}}ner {{ LEFWx>}} uni-obuda outgoing We are th{{ WoXAGS>}}e biggest distributor and fac{{ xRCXTNI>}}tory of or{{ TvUsbw
+# ATTN:rudas@uni-obuda.hu {{emilia daniel oscar}} How are you? Greeting from Retek Logistics This is Victoria, Wish you {{grace nancy}}to {{amy thomas}}enjoy {{arthur alex
+# <div style="font-size:0px;line-height:1px;mso-line-height-rule:exactly;display:none;max-width:0px;max-height:0px;opacity:0;overflow:hidden;mso-hide:all;">preview
+#   <span style="FONT-SIZE: 0px; FONT-FAMILY: q; LINE-HEIGHT: normal; font-stretch: normal"> random...
+#   <div class="preheader" style="display:none;font-size:1px;color:#333333;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">preview
+#  <span class="es-preheader" style="display:block !important;font-size:0px;font-color:#ffffff;">
         tag=tag.replace(b': ',b':')
 #        if b'font-size:0' in tag or b'display:none' in tag or b'max-height:0' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
-        if b'font-size:0px' in tag or b'display:none' in tag or b'max-height:0px' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
+        if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
-#            if len(txt.strip())>=5: text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
-            if len(txt.strip())>=10: text+=b'{{'+txt+b'}}' # hidden text
+#            if len(txt.strip())>=5: 
+#            text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
+            if b'display:none' in tag and len(text.strip())==0:
+                if len(txt.strip())>=3: text+=b'['+txt+b'] ' # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
+            else:
+                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
     try:
@@ -137,10 +147,17 @@ def html2text(data):
 
   return (b' '.join(text.split())).replace(b'<BR>',b'\n')
 
+def is_utf8(s):
+#    l=len(s)
+    n=sum(c>=192 for c in s) # n# of utf8 characters
+    m=sum(c>=128 for c in s) # n# of utf8 bytes
+    return n>=5 and m>=2*n
+
+
 def decode_payload(data,ctyp="text/html",charset=None):
 
     ldata=data.lower()
-    if ctyp=="text/html" or ctyp=="text/xml" or (ctyp!="text/plain" and data.find(b'<')>=0 and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
+    if ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
         p=ldata.find(b'<body')
         if p>0:
             charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
@@ -162,10 +179,26 @@ def decode_payload(data,ctyp="text/html",charset=None):
     elif charset[0:4]=="utf8":
       charset="utf-8"
 
+    # Try UTF-8:
+    if charset=="utf-8" or is_utf8(data):
+        try:
+            data=data.decode("utf-8", 'strict')
+            return unescape(data) # fix &gt; etc
+        except UnicodeDecodeError as e:
+#            print(repr(e))
+            print('BadUTF8, CHARSET='+charset)
+            pass
+
+#    print('CHARSET='+charset)
     try:
         data=data.decode(charset, 'mixed')
-    except:
-        data=data.decode("utf-8", 'mixed')
+    except LookupError: # nincs 'charset' nevu kodlap:
+        data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
+
+#    try:
+#        data=data.decode(charset, 'mixed')
+#    except:
+#        data=data.decode("utf-8", 'mixed')
 #    data=xmldecode(data) # plaintextre is rafer...
     return unescape(data) # fix &gt; etc
 
