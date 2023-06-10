@@ -1,4 +1,5 @@
 
+import io
 import codecs
 import email
 import email.policy
@@ -85,7 +86,7 @@ def html2text(data):
   text=b''
   for ret in data.split(b'<'):
     try:
-      tag,txt=ret.split(b'>',1)
+      tag,txt=ret.rsplit(b'>',1) # pl.: <img width="600" height="87" alt="Csak a Minősített Fogyasztóbarát Lakáshitel érdekel >>" style="display:block...">text
     except:
       text+=ret
       continue
@@ -113,8 +114,8 @@ def html2text(data):
 #            text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
             if b'display:none' in tag and len(text.strip())==0:
                 if len(txt.strip())>=3: text+=b'['+txt+b'] ' # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
-            else:
-                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
+#            else:
+#                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
     try:
@@ -202,9 +203,11 @@ def decode_payload(data,ctyp="text/html",charset=None):
 #    data=xmldecode(data) # plaintextre is rafer...
     return unescape(data) # fix &gt; etc
 
-
 def eml2str(msg):
-  msg = email.message_from_bytes(msg)
+  if isinstance(msg, io.IOBase):
+    msg = email.message_from_binary_file(msg)
+  elif type(msg)==bytes:
+    msg = email.message_from_bytes(msg)
   text=""
   #pp = msg.get_payload()
   for p in msg.walk():
@@ -287,6 +290,34 @@ def get_mimedata(eml):
 #                walker(subpart,level+1)
     walker(msg)
     return mimeinfo,mimedata
+
+
+
+
+def vocab_split(preview):
+    tok=[]
+    s=""
+    inw=False
+    for c in preview:
+        if c in '\n\t #".,!?;:-+/*()[]0123456789':
+            if inw:
+                tok.append(s)
+                s=c
+                inw=False
+                continue
+            s+=c
+            continue
+        if inw:
+            s+=c
+            continue
+        tok.append(s)
+        s=c
+        inw=True
+    tok.append(s)
+    return tok
+
+
+
 
 
 if __name__ == "__main__":
