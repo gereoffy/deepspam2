@@ -68,9 +68,13 @@ def parse_htmlhead(data,charset=None):
   return charset
 
 
+#fileno=1000
+
 def html2text(data):
+#  global fileno
   in_style=0
   in_script=0
+  warning=''
 
 #  data=HTML_comment.sub("<comment>",data)
   p=data.find(b'<!--')
@@ -83,18 +87,66 @@ def html2text(data):
     data=data[:p]+data[q+3:]
     p=data.find(b'<!--',p)
 
-  text=b''
-  for ret in data.split(b'<'):
-    try:
-      tag,txt=ret.rsplit(b'>',1) # pl.: <img width="600" height="87" alt="Csak a Minősített Fogyasztóbarát Lakáshitel érdekel >>" style="display:block...">text
-    except:
-      text+=ret
-      continue
+
+  p=data.find(b'<')
+  if p<0: return data # not html!?
+  text=data[:p] # initial text before 1st tag
+  while p<len(data):  #for ret in data.split(b'<'):
+
+    # find end of tag!
+    q=p+1
+#    while q<len(data) and data[p]<=32: continue # skip whitespace
+    ijel=None
+    eqsn=False
+
+    # handle special CDATA block:        van meg mas is:  if sectName in {"temp", "cdata", "ignore", "include", "rcdata"}:
+    if data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
+      q=data.find(b']]>',p)
+      warning+="CDATA block found: %d-%d\n"%(p,q)
+      if q<0: q=p+1 # broken...
+
+    while q<len(data):
+      c=data[q]
+      q+=1
+      if ijel:
+        if c==62 or c==60:
+            warning+="WARN! %c inside %c at %d\n"%(c,ijel,q)
+        if c==ijel: ijel=None # idezet vege
+        continue
+      if eqsn:
+        if c==34 or c==39: # idezojelek = utan oke
+            ijel=c
+        if c>32:           # nem whitespace (9,10,13,32)
+            eqsn=False
+      else:
+        # WTF!???  <img src="..." alt="Russell Hobbs 25710-56/RH Velocity turmixgép" "="" width="240" border="0">
+        # WTF!!!?  <span style="font-family: "playfair display", georgia, "times new roman", serif; color: #e6007e;">
+        if c==34 or c==39: # idezojelek = jel nelkul:
+            # kivetel persze ez mivel itt megengedett...
+            # <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional //EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+            if data[p+1]!=33: # !
+                warning+="WARN! %c without = at %d\n"%(c,q)
+      if c==61: eqsn=True #  =
+      if c==62: break     #  >
+    # 
+    tag=data[p+1:q-1].lower() # tag without < >
+#    print(p,q,tag) # debug
+
+    p=data.find(b'<',q)
+    if p<0: p=len(data)
+    txt=data[q:p]
+#    print(q,p,txt) # debug
+
+#    try:
+#      tag,txt=ret.rsplit(b'>',1) # pl.: <img width="600" height="87" alt="Csak a Minősített Fogyasztóbarát Lakáshitel érdekel >>" style="display:block...">text
+#    except:
+#      text+=ret
+#      continue
 #      print(ret.encode("utf-8"))
 #      break
 #    print("TAG: '%s'"%(tag))
+#    tag=tag.lower()
 
-    tag=tag.lower()
     if b'style' in tag: # detect hidden text!
 #  <span style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">
 #  <div style="display:none !important; font-size:1px; color:#f0f0f0; line-height:1px; font-family:arial,helvetica,sans-serif; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
@@ -114,24 +166,40 @@ def html2text(data):
 #            text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
             if b'display:none' in tag and len(text.strip())==0:
                 if len(txt.strip())>=3: text+=b'['+txt+b'] ' # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
-#            else:
-#                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
+            else:
+                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
     try:
-      tag1=tag.split()[0].lower()
+      tag1=tag.split()[0] #.lower()
     except:
 #      print("TAG parse error: '%s'"%(str(tag)))
       tag1=""
 
     if tag1==b'style':
       in_style+=1
-    if tag1==b'/style':
+      # probaljuk megkeresni a veget!
+      p=data.find(b'</',q)
+      if p<0 or data[p:p+8].lower()!=b'</style>':
+        p=data.find(b'<',q)
+        warning+="STYLE block endtag not found: %d-%d\n"%(q,p)
+#      else: print("STYLE block found:",q,p)
+    elif tag1==b'/style':
       in_style-=1
+
     if tag1==b'script':
       in_script+=1
-    if tag1==b'/script':
+      # probaljuk megkeresni a veget!
+      p=data.find(b'</',q)
+      if p<0 or data[p:p+9].lower()!=b'</script>':
+        p=data.find(b'<',q)
+        warning+="SCRIPT block endtag not found: %d-%d\n"%(q,p)
+#      else: print("SCRIPT block found:",q,p)
+    elif tag1==b'/script':
       in_script-=1
+
+#    print(q,p,in_style,in_script,txt) # debug
+
 #    print(tag1)
 #    print(text)
     if in_style<=0 and in_script<=0:
@@ -146,7 +214,14 @@ def html2text(data):
 #      text+=b' '.join(txt.split()) # whitespace...
       text+=txt
 
-  return (b' '.join(text.split())).replace(b'<BR>',b'\n')
+#  if warning and fileno:
+#     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
+#     fileno+=1
+
+#  return (b' '.join(text.split())).replace(b'<BR>',b'\n')
+  text=b' '.join(text.split())  # remove redundant spaces
+  return b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
+
 
 def is_utf8(s):
 #    l=len(s)
@@ -336,7 +411,8 @@ if __name__ == "__main__":
 #    print(parse_htmlhead(b'  <meta charset="utf-8"/>'))
 #    print(parse_htmlhead(b'<meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>'))
 #    t=b'<p>Hello<em>World</em>!!! em</p>'
-    t=b'<p>Hello<i>World</em>!!! em</p>'
-    print(t)
-    print(html2text(t))
-
+#    t=b'<p>Hello<i>World</em>!!! em</p>'
+#    print(t)
+    import sys
+    t=open(sys.argv[1],"rb").read()
+    html2text(t)
