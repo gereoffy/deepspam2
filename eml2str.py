@@ -9,6 +9,27 @@ from html import unescape  #  https://docs.python.org/3/library/html.html
 #import html5lib # testing
 #from html.entities import name2codepoint
 
+# docx olvasashoz:
+import zipfile
+
+try:
+  from striprtf import rtf_to_text
+  rtf_support=1
+except:
+  rtf_support=0
+
+try:
+  from tnefparse import TNEF
+  tnef_support=1  # TNEF/HTML support
+#  if rtf_support:
+#    try:
+#      import compressed_rtf
+#      tnef_support=2  # TNEF/RTF support
+#    except:
+#      pass
+except:
+  tnef_support=0
+
 
 charset_mapping = {
     'cp-850':              'cp850',
@@ -492,10 +513,10 @@ def parse_ics(data):
     hdr=b''
     for line in data.split(b'\n'):
         if line[:1]==b' ' or line[:1]==b'\t':
-            hdr+=line[1:]
+            hdr+=line[1:].rstrip()
             continue
         if hdr: ics.append(hdr.split(b':',1))
-        hdr=line
+        hdr=line.rstrip()
     if hdr: ics.append(hdr.split(b':',1))
 
     def unescape(text):
@@ -508,10 +529,27 @@ def parse_ics(data):
 
     for x in ics:
 #        print(x)
-        if x[0]==b'DESCRIPTION': return unescape(x[1])
+        if x[0][:11]==b'DESCRIPTION': return unescape(x[1])  # DESCRIPTION;LANGUAGE=hu-HU:Kedves Endre\,\n\n\nSzeretettel várjuk Önt a m
         if x[0]==b'X-ALT-DESC;FMTTYPE=text/html': return html2text(unescape(x[1]))
     return b'' #  FIXME
 
+
+def parse_docx(data):   # if ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document" or fnev.endswith(".docx"):
+#    try:
+        zipf=zipfile.ZipFile(io.BytesIO(data))
+        xml=zipf.read('word/document.xml') #.decode("utf-8")
+        s=b''
+        for ret in xml.split(b'<'):
+            try:
+                tag,txt=ret.split(b'>',1)
+                tag1=tag.split()[0]
+            except:
+                continue
+            if tag1==b'w:t':
+                s+=txt
+            elif tag1 in [b'w:tab',b'w:br',b'w:cr',b'w:p']:
+                s+=b'\n'
+        return s
 
 
 def is_utf8(s):
@@ -548,8 +586,19 @@ def decode_payload(data,ctyp="text/html",charset=None):
     data5=None
 
     ldata=data.lower()
-    if ctyp=="text/calendar":
+    if ctyp=="text/calendar" or ctyp=="application/ics":
         data=parse_ics(data)
+    elif ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        data=parse_docx(data)
+        charset="utf-8"
+    elif ctyp=="application/ms-tnef" and tnef_support:
+        print("###### Parse TNEF ######")
+        tnefobj = TNEF(data)
+        if tnefobj.htmlbody:
+            charset="utf-8"
+            data=html2text(tnefobj.htmlbody.encode(charset))
+#         elif tnef_support>1 and tnefobj.rtfbody:
+#            s = rtf_to_text(tnefobj.rtfbody.decode(tnefcp,"ignore"))
     elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
 #        origdata=str(charset).encode()+b'\n'+data
 #        data5=html2text5(data)        # html5lib version
@@ -579,8 +628,12 @@ def decode_payload(data,ctyp="text/html",charset=None):
             print('BAD_CHARSET='+charset)
             data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
 
-    data=unescape(data)
-    
+    # ezt mar a dekodolas utan kell :(
+    if ctyp=="application/rtf" and rtf_support:
+        data = rtf_to_text(data)
+    else:
+        data=unescape(data)
+
 #    data=''.join([invalid_charrefs.get(ord(c),c) for c in data])
 
     if data5:
@@ -610,7 +663,7 @@ def eml2str(msg):
     fnev=str(p.get_filename())
     disp=p.get_content_disposition()
 #    print((ctyp,charset,disp,fnev))
-    if ctyp.split('/')[0]=="text" and disp!="attachment":
+    if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support):
 #      try:
         data=p.get_payload(decode=True)
         data=decode_payload(data,ctyp,charset)
@@ -640,7 +693,7 @@ def get_mimedata(eml):
         html=None
         if pay:
             s+="%d"%(len(pay))
-            if ctyp.startswith("text/"):
+            if ctyp.startswith("text/") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support) or ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 html=decode_payload(pay,ctyp,cset) # ez meg a soup-prettify elott kell, mert az elbassza a whitespacet...
                 if ctyp=="text/html" or ctyp=="text/xml":
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
