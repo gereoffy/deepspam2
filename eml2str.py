@@ -287,7 +287,7 @@ def parse_htmlhead(data,charset=None):
           if c==34 or c==39:  # idezojelek
             if charset: break
             continue
-          if not c in b'-0123456789abcdefghijklmnopqrstuvwxyz': break
+          if not c in b'_-0123456789abcdefghijklmnopqrstuvwxyz': break
           charset+=chr(c)
 #        print('CHARSET='+charset)
         if charset: break
@@ -349,6 +349,7 @@ def html2text(data):
       else:
         # WTF!???  <img src="..." alt="Russell Hobbs 25710-56/RH Velocity turmixgép" "="" width="240" border="0">
         # WTF!!!?  <span style="font-family: "playfair display", georgia, "times new roman", serif; color: #e6007e;">
+        # <div align="center" arial,="" helvetica="" helvetica,="" neue",="" sans-serif;"="" style="outline: currentcolor none 0px; font-size: 13px;
         if c==34 or c==39: # idezojelek = jel nelkul:
             # kivetel persze ez mivel itt megengedett...
             # <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional //EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -375,7 +376,7 @@ def html2text(data):
       c=data[p+1]
       if tag1 in [b'style',b'script',b'title',b'svg',b'annotation']: # TODO FIXME: svg kell ide?
         if c==47 and data[p+2:p+2+len(tag1)].lower()==tag1:
-          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
+#          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
           break # found end-tag pair
         if c==33 and data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
           pp=data.find(b']]>',p)
@@ -420,8 +421,8 @@ def html2text(data):
 #            text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
             if b'display:none' in tag and len(text.strip())==0:
                 if len(txt.strip())>=3: text+=b'['+txt+b'] ' # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
-            else:
-                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
+#            else:
+#                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
     if tag1==b'style': in_style+=1
@@ -449,6 +450,9 @@ def html2text(data):
 #     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
 #     fileno+=1
 
+  if in_style!=0: warning+="in_style=%d\n"%(in_style)
+  if in_script!=0: warning+="in_script=%d\n"%(in_script)
+#  if warning: text=("!!! "+warning+" !!!").encode()+text
 #  if warning: print(warning)
 
 #  return (b' '.join(text.split())).replace(b'<BR>',b'\n')
@@ -482,9 +486,9 @@ def html2text5(data):
 
 
 def is_utf8(s):
-    s=[c for c in s if c>=128] # only non-ascii bytes
-    if len(s)<2: return False
-    lengths=[ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,   0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 3, 3, 4, 0 ]
+#    s=[c for c in s if c>=128] # only non-ascii bytes
+#    if len(s)<2: return False
+    lengths=[ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,   0, 0, 0, 0, 0, 0, 0, 0,   2, 2, 2, 2,   3, 3, 4, 0 ]
     ok=0
     bad=0
     e=0
@@ -498,12 +502,12 @@ def is_utf8(s):
         else:
           bad+=1
       else:
-        bad+=e  # ha e>0, akkor hianyzik 'e' darab extra byte meg, es ujra start-byte jott!!
+        bad+=e  # ha e>0, akkor hianyzik 'e' darab extra byte meg, es ujra start-byte (vagy ascii) jott!!
         e=l-1
 
     if e>0: bad+=e # hianyzik par byte...
 #    print(ok,bad)
-    return ok>3*bad # ha bad==0 akkor ok==1 is eleg!
+    return ok>4*bad # ha bad==0 akkor ok==1 is eleg!
 
 #    l=len(s)
 #    n=sum(c>=192 for c in s) # n# of utf8 characters
@@ -530,21 +534,19 @@ def decode_payload(data,ctyp="text/html",charset=None):
     elif charset in charset_mapping:
       charset=charset_mapping[charset]
 
-    # Try UTF-8:
     if charset=="utf-8" or is_utf8(data):
+        # Try UTF-8:
         try:
             data=data.decode("utf-8", 'strict')
-            return unescape(data) # fix &gt; etc
         except UnicodeDecodeError as e:
-#            print(repr(e))
-            print('BadUTF8, CHARSET='+charset)
-            pass
-
-#    print('CHARSET='+charset)
-    try:
-        data=data.decode(charset, 'mixed')
-    except LookupError: # nincs 'charset' nevu kodlap:
-        data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
+            print('BAD_UTF8, CHARSET='+charset) #, repr(e))
+            data=data.decode(charset, 'mixed')  # exceptiont dob ha nincs ilyen charset!
+    else:
+        try:
+            data=data.decode(charset, 'mixed')
+        except LookupError: # nincs 'charset' nevu kodlap:
+            print('BAD_CHARSET='+charset)
+            data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
 
     data=unescape(data)
     
@@ -700,9 +702,9 @@ if __name__ == "__main__":
 #    print(t)
     import sys
 
-#    x="Gárdos Péter filmrendező-író volt Veiszer Alinda vendége, aki többek között beszélt ".encode("utf-8")
-#    print(is_utf8(x))
-#    exit(0)
+    x="Gárdos Péter filmrendező-író volt Veiszer Alinda vendége, aki többek között beszélt ".encode("utf-8")
+    print(is_utf8(x))
+    exit(0)
 
 
     t=open(sys.argv[1],"rb").read()
