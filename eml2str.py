@@ -441,7 +441,7 @@ def html2text(data):
       else:
 #        if tag1.startswith(b'/'): tag1=tag1[1:] # closing tag
         if tag1[:1]==b'/': tag1=tag1[1:] # closing tag
-        if not tag1 in [b'span',b'a',b'b',b'i',b'u',b'em',b'strong',b'abbr']: text+=b' ' # not inline elements
+        if not tag1 in [b'span',b'a',b'b',b'i',b'u',b'em',b'strong',b'abbr',b'font']: text+=b' ' # not inline elements
 #      text+=txt.strip() # test/fixme
 #      text+=b' '.join(txt.split()) # whitespace...
       text+=txt
@@ -485,6 +485,35 @@ def html2text5(data):
   return '\n'.join([ t.strip() for t in text.split('<BR>') ])
 
 
+
+
+def parse_ics(data):
+    ics=[]
+    hdr=b''
+    for line in data.split(b'\n'):
+        if line[:1]==b' ' or line[:1]==b'\t':
+            hdr+=line[1:]
+            continue
+        if hdr: ics.append(hdr.split(b':',1))
+        hdr=line
+    if hdr: ics.append(hdr.split(b':',1))
+
+    def unescape(text):
+        return text.replace(b'\\N', b'\\n')\
+                   .replace(b'\r\n', b'\n')\
+                   .replace(b'\\n', b'\n')\
+                   .replace(b'\\,', b',')\
+                   .replace(b'\\;', b';')\
+                   .replace(b'\\\\', b'\\')
+
+    for x in ics:
+#        print(x)
+        if x[0]==b'DESCRIPTION': return unescape(x[1])
+        if x[0]==b'X-ALT-DESC;FMTTYPE=text/html': return html2text(unescape(x[1]))
+    return b'' #  FIXME
+
+
+
 def is_utf8(s):
 #    s=[c for c in s if c>=128] # only non-ascii bytes
 #    if len(s)<2: return False
@@ -519,7 +548,9 @@ def decode_payload(data,ctyp="text/html",charset=None):
     data5=None
 
     ldata=data.lower()
-    if ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
+    if ctyp=="text/calendar":
+        data=parse_ics(data)
+    elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
 #        origdata=str(charset).encode()+b'\n'+data
 #        data5=html2text5(data)        # html5lib version
         p=ldata.find(b'<body')
@@ -679,9 +710,6 @@ def vocab_split(preview):
     return tok
 
 
-
-
-
 if __name__ == "__main__":
 #    s='&nbsp;&nbsp; Elküldve: 2023. május 31. 13:06:16 (UTC&#43;01:00) Belgrád, Budapest, Ljubljana, Pozsony, Prága<br>'
 #    print(s)
@@ -702,14 +730,17 @@ if __name__ == "__main__":
 #    print(t)
     import sys
 
-    x="Gárdos Péter filmrendező-író volt Veiszer Alinda vendége, aki többek között beszélt ".encode("utf-8")
-    print(is_utf8(x))
-    exit(0)
+#    x="Gárdos Péter filmrendező-író volt Veiszer Alinda vendége, aki többek között beszélt ".encode("utf-8")
+#    print(is_utf8(x))
+#    exit(0)
 
+    t=open("sample.ics","rb").read()
+    x=parse_ics(t)
+    print(x.decode())
 
-    t=open(sys.argv[1],"rb").read()
+#    t=open(sys.argv[1],"rb").read()
 #    print(decode_payload(t,ctyp="text/html",charset=None))
-    decode_payload(t,ctyp="text/html",charset=None)
+#    decode_payload(t,ctyp="text/html",charset=None)
 
 #    t1=html2text(t)
 #    t2=html2text5(t)
