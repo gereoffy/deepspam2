@@ -256,10 +256,8 @@ invalid_charrefs = {
     0x9d: '',        # <control>
     0x9e: '\u017e',  # LATIN SMALL LETTER Z WITH CARON
     0x9f: '\u0178',  # LATIN CAPITAL LETTER Y WITH DIAERESIS
-    0xA0: ' ',       # Unicode Character 'NO-BREAK SPACE' (U+00A0)
-    0xAD: '',        # SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
-    0x200B: '',      # ZWSP - Zero width space (kb ugyanaz mint a 0xAD)  https://en.wikipedia.org/wiki/Zero-width_space
-    0x200C: '',      # ZWNJ - Zero-width non-joiner  (ligaturak miatt van)  https://en.wikipedia.org/wiki/Zero-width_non-joiner
+    0xA0: ' ',       # nbsp Unicode Character 'NO-BREAK SPACE' (U+00A0)
+    0xAD: '',        # &shy SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
 }
 
 
