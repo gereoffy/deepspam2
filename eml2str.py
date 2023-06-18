@@ -1,22 +1,27 @@
 
 import io
 import codecs
+import re
+import zipfile
 import email
 import email.policy
-import re
-from bs4 import BeautifulSoup
+
 from html import unescape  #  https://docs.python.org/3/library/html.html
-#import html5lib # testing
 #from html.entities import name2codepoint
 
-# docx olvasashoz:
-import zipfile
+#import html5lib # testing
+
+try:
+  from bs4 import BeautifulSoup
+  bs4_support=True
+except:
+  bs4_support=False
 
 try:
   from striprtf import rtf_to_text
-  rtf_support=1
+  rtf_support=True
 except:
-  rtf_support=0
+  rtf_support=False
 
 try:
   from tnefparse import TNEF
@@ -710,9 +715,10 @@ def get_mimedata(eml):
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
 #                soup=BeautifulSoup(pay,features="lxml", from_encoding=cset)
 #                soup=BeautifulSoup(pay,"html.parser")
-                    soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
-                    pay=soup.prettify(encoding="utf-8")
-#                html=soup.get_text()
+                    if bs4_support:
+                        soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
+                        pay=soup.prettify(encoding="utf-8")
+#                       html=soup.get_text()
 #            elif cset and cset.lower()!="utf-8":   #  plaintext eseten itt kezeljuk a charset kerdest...
 #            else:
 #                pay=pay.decode(cset,errors="ignore").encode("utf-8")
