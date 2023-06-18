@@ -334,22 +334,21 @@ def parse_htmlhead(data,charset=None):
 fileno=1000
 
 def html2text(data):
-#  global fileno
+  global fileno
   in_style=0
   in_script=0
   warning=''
+  error=False
 
 #  data=HTML_comment.sub("<comment>",data)
-  p=data.find(b'<!--')
-  while p>=0:
-    q=data.find(b'-->',p)
-    if q<p:
-      data=data[:p]
-      break
-#    data=data[:p]+" HTMLcomment "+data[q+3:]
-    data=data[:p]+data[q+3:]
-    p=data.find(b'<!--',p)
-
+#  p=data.find(b'<!--')
+#  while p>=0:
+#    q=data.find(b'-->',p)
+#    if q<p:
+#      data=data[:p]
+#      break
+#    data=data[:p]+data[q+3:]
+#    p=data.find(b'<!--',p)
 
   p=data.find(b'<')
   if p<0: return data # not html!?
@@ -366,7 +365,16 @@ def html2text(data):
     if data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
       q=data.find(b']]>',p)
       warning+="CDATA block found: %d-%d\n"%(p,q)
+#      print("\r!!!! CDATA block found: %d-%d !!!!\n"%(p,q))
+      error=True
       if q<0: q=p+1 # broken...
+    elif data[p:p+4]==b'<!--':  # comment
+      q=data.find(b'-->',p)
+      warning+="COMMENT block found: %d-%d\n"%(p,q)
+#      print("COMMENT block found: %d-%d\n"%(p,q))
+      if q<0:
+        q=p+1 # broken...
+        error=True
 
     while q<len(data):
       c=data[q]
@@ -394,13 +402,20 @@ def html2text(data):
       if c==62: break     #  >
     # 
     tag=data[p+1:q-1].lower() # tag without < >
-#    print(p,q,tag) # debug
+#    print("TAG:",p,q,tag) # debug
 
     try:
       tag1=tag.split()[0] #.lower()
     except:
 #      print("TAG parse error: '%s'"%(str(tag)))
       tag1=tag
+
+#    print(tag1)
+    if tag1==b'style': in_style+=1
+    elif tag1==b'/style': in_style-=1
+    elif tag1==b'script': in_script+=1
+    elif tag1==b'/script': in_script-=1
+
 
     # FIND next tag:
     p=data.find(b'<',q)
@@ -409,18 +424,31 @@ def html2text(data):
         p=len(data) # EOF
         break
       c=data[p+1]
+#      print(p,c)
       if tag1 in [b'style',b'script',b'title',b'svg',b'annotation']: # TODO FIXME: svg kell ide?
         if c==47 and data[p+2:p+2+len(tag1)].lower()==tag1:
-#          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
+          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
+#          print(str(tag1)+" block found: %d-%d\n"%(q,p))
           break # found end-tag pair
         if c==33 and data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
           pp=data.find(b']]>',p)
           warning+="CDATA block found in %s: %d-%d\n"%(str(tag1),p,pp)
-          if pp>0: p=pp+3
+#          print("CDATA block found in %s: %d-%d\n"%(str(tag1),p,pp))
+#          error=True
+          if pp>0: p=pp #+3    nem szabad a kovetkezo < jelre mutatnia a p-nek, mert a loop vegen van egy find p+1 es akkor pont atugorja!!!
+        ### HTML <!-- comment tag --> should be ignored inside a style block:  https://www.w3.org/TR/CSS21/syndata.html#comments
+#        elif c==33 and data[p:p+4]==b'<!--':  # html comment?
+#          pp=data.find(b'-->',p)
+#          warning+="COMMENT block found in %s: %d-%d\n"%(str(tag1),p,pp)
+#          print("\r!!!! COMMENT block in %s: %d-%d !!!!\n"%(str(tag1),p,q))
+#          error=True
+#          if pp>0: p=pp+3
+        #else: print("WARN! skip <%c at %d in %s\n"%(c,p,str(tag1)))  # igazabol itt lehet barmi, megengedett...
       else:
         # <?xml:namespace prefix = "o" ns = "urn:schemas-microsoft-com:office:office" />
         if c==47 or c==33 or 97<=c<=122 or 65<=c<=90 or c==63: break  #  </ or <! or <tag (a-z,A-Z) or <?xml
-      warning+="WARN! skip <%c at %d\n"%(c,p)
+        warning+="WARN! skip <%c at %d\n"%(c,p)
+#        print("WARN! skip <%c at %d\n"%(c,p))
       p=data.find(b'<',p+1) # skip this < and find next one
 
 
@@ -460,11 +488,6 @@ def html2text(data):
 #                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
-    if tag1==b'style': in_style+=1
-    elif tag1==b'/style': in_style-=1
-    elif tag1==b'script': in_script+=1
-    elif tag1==b'/script': in_script-=1
-
 #    print(q,p,in_style,in_script,txt) # debug
 
 #    print(tag1)
@@ -481,13 +504,14 @@ def html2text(data):
 #      text+=b' '.join(txt.split()) # whitespace...
       text+=txt
 
-#  if warning and fileno:
-#     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
-#     fileno+=1
+  if error:
+     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
+     fileno+=1
 
   if in_style!=0: warning+="in_style=%d\n"%(in_style)
   if in_script!=0: warning+="in_script=%d\n"%(in_script)
 #  if warning: text=("!!! "+warning+" !!!").encode()+text
+
 #  if warning: print(warning)
 
 #  return (b' '.join(text.split())).replace(b'<BR>',b'\n')
@@ -633,13 +657,13 @@ def decode_payload(data,ctyp="text/html",charset=None):
         try:
             data=data.decode("utf-8", 'strict')
         except UnicodeDecodeError as e:
-            print('BAD_UTF8, CHARSET='+charset) #, repr(e))
+#            print('BAD_UTF8, CHARSET='+charset) #, repr(e))
             data=data.decode(charset, 'mixed')  # exceptiont dob ha nincs ilyen charset!
     else:
         try:
             data=data.decode(charset, 'mixed')
         except LookupError: # nincs 'charset' nevu kodlap:
-            print('BAD_CHARSET='+charset)
+#            print('BAD_CHARSET='+charset)
             data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
 
     # ezt mar a dekodolas utan kell :(
@@ -804,13 +828,13 @@ if __name__ == "__main__":
 #    print(is_utf8(x))
 #    exit(0)
 
-    t=open("sample.ics","rb").read()
-    x=parse_ics(t)
-    print(x.decode())
+#    t=open("sample.ics","rb").read()
+#    x=parse_ics(t)
+#    print(x.decode())
 
-#    t=open(sys.argv[1],"rb").read()
+    t=open(sys.argv[1],"rb").read()
 #    print(decode_payload(t,ctyp="text/html",charset=None))
-#    decode_payload(t,ctyp="text/html",charset=None)
+    decode_payload(t,ctyp="text/html",charset=None)
 
 #    t1=html2text(t)
 #    t2=html2text5(t)
