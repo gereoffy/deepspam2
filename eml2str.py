@@ -221,8 +221,11 @@ charset_mapping = {
 }
 
 
+# based on:  /usr/lib/python3.10/html/__init__.py
 invalid_charrefs = {
+    0x00: ' ',        # REPLACEMENT CHARACTER
     0x80: '\u20ac',  # EURO SIGN
+    0x81: '',        # <control>
     0x82: '\u201a',  # SINGLE LOW-9 QUOTATION MARK
     0x83: '\u0192',  # LATIN SMALL LETTER F WITH HOOK
     0x84: '\u201e',  # DOUBLE LOW-9 QUOTATION MARK
@@ -234,7 +237,10 @@ invalid_charrefs = {
     0x8a: '\u0160',  # LATIN CAPITAL LETTER S WITH CARON
     0x8b: '\u2039',  # SINGLE LEFT-POINTING ANGLE QUOTATION MARK
     0x8c: '\u0152',  # LATIN CAPITAL LIGATURE OE
+    0x8d: '',        # <control>
     0x8e: '\u017d',  # LATIN CAPITAL LETTER Z WITH CARON
+    0x8f: '',        # <control>
+    0x90: '',        # <control>
     0x91: '\u2018',  # LEFT SINGLE QUOTATION MARK
     0x92: '\u2019',  # RIGHT SINGLE QUOTATION MARK
     0x93: '\u201c',  # LEFT DOUBLE QUOTATION MARK
@@ -247,8 +253,13 @@ invalid_charrefs = {
     0x9a: '\u0161',  # LATIN SMALL LETTER S WITH CARON
     0x9b: '\u203a',  # SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
     0x9c: '\u0153',  # LATIN SMALL LIGATURE OE
+    0x9d: '',        # <control>
     0x9e: '\u017e',  # LATIN SMALL LETTER Z WITH CARON
     0x9f: '\u0178',  # LATIN CAPITAL LETTER Y WITH DIAERESIS
+    0xA0: ' ',       # Unicode Character 'NO-BREAK SPACE' (U+00A0)
+    0xAD: '',        # SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
+    0x200B: '',      # ZWSP - Zero width space (kb ugyanaz mint a 0xAD)  https://en.wikipedia.org/wiki/Zero-width_space
+    0x200C: '',      # ZWNJ - Zero-width non-joiner  (ligaturak miatt van)  https://en.wikipedia.org/wiki/Zero-width_non-joiner
 }
 
 
@@ -591,15 +602,15 @@ def decode_payload(data,ctyp="text/html",charset=None):
     elif ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         data=parse_docx(data)
         charset="utf-8"
-    elif ctyp=="application/ms-tnef" and tnef_support:
-        print("###### Parse TNEF ######")
+    elif ctyp=="application/ms-tnef":
+#        print("###### Parse TNEF ######")
         tnefobj = TNEF(data)
         if tnefobj.htmlbody:
             charset="utf-8"
             data=html2text(tnefobj.htmlbody.encode(charset))
 #         elif tnef_support>1 and tnefobj.rtfbody:
 #            s = rtf_to_text(tnefobj.rtfbody.decode(tnefcp,"ignore"))
-    elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
+    elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata or b'</br>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
 #        origdata=str(charset).encode()+b'\n'+data
 #        data5=html2text5(data)        # html5lib version
         p=ldata.find(b'<body')
@@ -629,12 +640,14 @@ def decode_payload(data,ctyp="text/html",charset=None):
             data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
 
     # ezt mar a dekodolas utan kell :(
-    if ctyp=="application/rtf" and rtf_support:
-        data = rtf_to_text(data)
+    if ctyp=="application/rtf":
+        data=rtf_to_text(data) # remove RTF markup
     else:
-        data=unescape(data)
+        data=unescape(data)  # fix &gt; etc
 
-#    data=''.join([invalid_charrefs.get(ord(c),c) for c in data])
+    # nbsp->space, remove SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
+#    data=data.replace('\u00A0',' ').replace('\u00AD','')
+    data=''.join([invalid_charrefs.get(ord(c),c) for c in data])
 
     if data5:
       data2=" ".join(data.split())
@@ -647,7 +660,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
         open("debug_%d.txt2"%(fileno),"wt").write(data5)
         fileno+=1
 
-    return data # fix &gt; etc
+    return data
 
 def eml2str(msg):
   if isinstance(msg, io.IOBase):
