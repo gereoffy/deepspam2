@@ -10,12 +10,7 @@ from html import unescape  #  https://docs.python.org/3/library/html.html
 #from html.entities import name2codepoint
 
 #import html5lib # testing
-
-try:
-  from bs4 import BeautifulSoup_
-  bs4_support=True
-except:
-  bs4_support=False
+# from bs4 import BeautifulSoup_
 
 try:
   from striprtf import rtf_to_text
@@ -329,17 +324,40 @@ def parse_htmlhead(data,charset=None):
   return charset
 
 
+# a tag-bol kiparsoljuk a tag nevet, es hogy milyen:  -1=endtag 0=selfclosing 1=nyito
+def tag_type(tag):
+    if tag[:1]==b'!': return 0,'!' # special
+    if tag[:1]==b'?': return 0,'?' # special
+    name=''
+    closing=False
+    for c in tag:
+        if c==47:  # /
+            if name: break # <br/>
+            closing=True   # a tag neve elott van a /
+            continue
+        if c<=32:  # whitespace
+            if not name: continue # a tag neve elotti whitespace
+            break # done
+        if c<97 or c>122: break  # fixme: szamokat is le kene kezelni!
+        name+=chr(c)
+#    print(name)
+    if name in ['br','area','base','meta','col','embed','hr','img','input','link','param','source','track','wbr']: return 0,name # self-closing tags
+    if closing: return -1,name
+    if tag[-1:]==b'/': return 0,name
+    return 1,name
 
 
 fileno=1000
 
-def html2text(data):
+def html2text(data,debug=False):
   global fileno
   warning=''
-
+  indent=0
+  
   p=data.find(b'<')
   if p<0: return data # not html!?
   text=data[:p] # initial text before 1st tag
+  html=data[:p]
   while p<len(data):  #for ret in data.split(b'<'):
 
     # FIND end of tag!
@@ -371,39 +389,51 @@ def html2text(data):
       if c==62: break     #  >
     # 
     tag=data[p+1:q-1].lower() # tag without < >
-    tag1=tag.split()[0]       # az elso whitespace-ig
-    in_block= tag1 in [b'style',b'script',b'title',b'svg',b'annotation']   # TODO FIXME: svg kell ide?
-#    print("TAG:",p,q,tag1,tag) # debug
+    tt,ttag=tag_type(tag)     # tag type,name
+    in_block= tt>0 and ttag in ['style','script','title','svg','annotation']   # TODO FIXME: svg kell ide?
+#    print("TAG:",p,q,tt,ttag,tag) # debug
+
+    if debug:
+      if tt<0: indent-=1
+      html+=b'%5d|'%(p)+b' '*max(0,min(48,indent)) + data[p:q].replace(b'\n',b' ')
+      if tt>0: indent+=1
 
     # FIND next tag:
     p=data.find(b'<',q)
     while True:
+#      print(p,in_block,data[p:p+10])
       if p<0 or p+2>=len(data):
         p=len(data) # EOF
         break
-      c=data[p+1]
       if in_block: # mas parser altal kezelt (js, css, svg stb) blokk veget keressuk, ebben csak a cdata-val kell foglalkozni az endtag-en kivul:
-        if c==47 and data[p+2:p+2+len(tag1)].lower()==tag1:  #  </tag1>
-#          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
+        endtag=bytes('</'+ttag,'ascii')            # ez igy nem szep, es elvileg lefuthat foloslegesen tobbszor is, de gyakorlatilag ez nem jellemzo
+        if data[p:p+len(endtag)].lower()==endtag:  #  </ttag>
+#          warning+="%s block found: %d-%d\n"%(ttag,q,p)
           break
-        if c==33 and data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
+        if data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
           pp=data.find(b']]>',p)
-#          warning+="CDATA block found in %s: %d-%d\n"%(str(tag1),p,pp)
+          warning+="CDATA block found in %s: %d-%d\n"%(ttag,p,pp)
           if pp>0: p=pp #+3    nem szabad a kovetkezo < jelre mutatnia a p-nek, mert a loop vegen van egy find p+1 es akkor pont atugorja!!!
-          else: warning+="WARN! missing CDATA end-tag at %d- (in %s)\n"%(p,str(tag1))
-        #else: warning+="WARN! skip <%c at %d in %s\n"%(c,p,str(tag1))   # igazabol itt lehet barmi, megengedett...
+          else: warning+="WARN! missing CDATA end-tag at %d- (in %s)\n"%(p,ttag)
+        #else: warning+="WARN! skip <%c at %d in %s\n"%(c,p,ttag)   # igazabol itt lehet barmi, megengedett...
       else:
+        c=data[p+1]
         if c==47 or c==33 or 97<=c<=122 or 65<=c<=90 or c==63: break  #  </ or <! or <tag [a-z,A-Z] or <?xml
         warning+="WARN! skip <%c at %d\n"%(c,p)  # hibas tag formatum!
       p=data.find(b'<',p+1) # skip this < and find next one
 
+    if debug:
+      html+=data[q:p].rstrip()+b'\n'
+      if warning: html+=b' <!> |' + warning.encode("utf-8",errors="ignore")  # beirjuk a sorok koze inkabb!
+      warning=""
+
     if in_block:
-#      print("Skipping %s block at %d-%d, size=%d"%(str(tag1),q,p,p-q))  # debug
-      if p>=len(data): warning+="WARN! non-closed tag %s at %d-\n"%(str(tag1),q)  # EOF, tehat nincs meg az endtag!
+#      print("Skipping %s block at %d-%d, size=%d"%(ttag,q,p,p-q))  # debug
+      if p>=len(data): warning+="WARN! non-closed tag %s at %d-\n"%(ttag,q)  # EOF, tehat nincs meg az endtag!
       continue
 
     txt=data[q:p]
-#    print(q,p,tag1,txt) # debug
+#    print(q,p,tt,ttag,txt) # debug
 
     if b'style' in tag: # detect hidden text!
         tag=tag.replace(b': ',b':')
@@ -415,22 +445,23 @@ def html2text(data):
 #                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
-    if tag==b'div' or tag1 in [b'p',b'br',b'br/',b'tr']:
+    if tag==b'div' or (tt>=0 and ttag in ['p','br','tr']):
         text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
     else:
-        if tag1[:1]==b'/': tag1=tag1[1:] # closing tag
-        if not tag1 in [b'span',b'a',b'b',b'i',b'u',b'em',b'strong',b'abbr',b'font']: text+=b' ' # not inline elements
+        if not ttag in ['span','a','b','i','u','em','strong','abbr','font']: text+=b' ' # not inline elements
     text+=txt
 
 #  if warning: text=("!!! "+warning+" !!!").encode()+text
-  if warning: print(warning)
+#  if debug and warning: print(warning)
+  if debug and warning: html+=b' <!> |' + warning.encode("utf-8",errors="ignore")  # beirjuk a sorok koze inkabb!
 #  if warning:
 #     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
 #     fileno+=1
 
   text=b' '.join(text.split())  # remove redundant spaces
-  return b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
-
+  text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
+  if debug: return text, html
+  return text
 
 
 def html2text5(data):
@@ -650,17 +681,9 @@ def get_mimedata(eml):
                 html=decode_payload(pay,ctyp,cset) # ez meg a soup-prettify elott kell, mert az elbassza a whitespacet...
                 if ctyp=="text/html" or ctyp=="text/xml":
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
-#                soup=BeautifulSoup(pay,features="lxml", from_encoding=cset)
-#                soup=BeautifulSoup(pay,"html.parser")
-                    if bs4_support:
-                        soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
-                        pay=soup.prettify(encoding="utf-8")
-#                       html=soup.get_text()
-#            elif cset and cset.lower()!="utf-8":   #  plaintext eseten itt kezeljuk a charset kerdest...
-#            else:
-#                pay=pay.decode(cset,errors="ignore").encode("utf-8")
-#                pay=decode_payload(pay,ctyp,cset).encode("utf-8",errors='xmlcharrefreplace') # plaintexthez is jo
-#                s+=" {%d}"%(len(pay))
+#                    soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
+#                    pay=soup.prettify(encoding="utf-8")
+                    text,pay=html2text(pay,debug=True)  # html prettify :)
         mimeinfo.append(s)
 
         # Attachment file:
