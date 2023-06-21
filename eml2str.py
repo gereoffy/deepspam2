@@ -12,7 +12,7 @@ from html import unescape  #  https://docs.python.org/3/library/html.html
 #import html5lib # testing
 
 try:
-  from bs4 import BeautifulSoup
+  from bs4 import BeautifulSoup_
   bs4_support=True
 except:
   bs4_support=False
@@ -335,20 +335,7 @@ fileno=1000
 
 def html2text(data):
   global fileno
-  in_style=0
-  in_script=0
   warning=''
-  error=False
-
-#  data=HTML_comment.sub("<comment>",data)
-#  p=data.find(b'<!--')
-#  while p>=0:
-#    q=data.find(b'-->',p)
-#    if q<p:
-#      data=data[:p]
-#      break
-#    data=data[:p]+data[q+3:]
-#    p=data.find(b'<!--',p)
 
   p=data.find(b'<')
   if p<0: return data # not html!?
@@ -357,65 +344,36 @@ def html2text(data):
 
     # FIND end of tag!
     q=p+1
-#    while q<len(data) and data[p]<=32: continue # skip whitespace
-    ijel=None
-    eqsn=False
 
-    # handle special CDATA block:        van meg mas is:  if sectName in {"temp", "cdata", "ignore", "include", "rcdata"}:
-    if data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
-      q=data.find(b']]>',p)
-      warning+="CDATA block found: %d-%d\n"%(p,q)
-#      print("\r!!!! CDATA block found: %d-%d !!!!\n"%(p,q))
-      error=True
-      if q<0: q=p+1 # broken...
-    elif data[p:p+4]==b'<!--':  # comment
+    if data[p:p+4]==b'<!--':  # comment "tag" - ennek csak --> lehet a vege, addig ignoralni kell mindent!
       q=data.find(b'-->',p)
-      warning+="COMMENT block found: %d-%d\n"%(p,q)
-#      print("COMMENT block found: %d-%d\n"%(p,q))
+#      warning+="COMMENT block found: %d-%d\n"%(p,q)
       if q<0:
         q=p+1 # broken...
-        error=True
+        warning+="WARN! missing comment end-tag at %d-\n"%(p)
 
+    ijel=None
+    eqsn=False
     while q<len(data):
       c=data[q]
       q+=1
-      if ijel:
-        if c==62 or c==60:
-            warning+="WARN! %c inside %c at %d\n"%(c,ijel,q)
-        if c==ijel: ijel=None # idezet vege
+      if ijel:  #  quoted string-en belul vagyunk?
+#        if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
+        if c==ijel: ijel=None  #  idezet vege
         continue
-      if eqsn:
-        if c==34 or c==39: # idezojelek = utan oke
-            ijel=c
-        if c>32:           # nem whitespace (9,10,13,32)
-            eqsn=False
+      if eqsn:  #  = jel utan vagyunk?
+        if c==34 or c==39: ijel=c   # idezojelek = utan oke
+        if c>32: eqsn=False         # nem whitespace (9,10,13,32)
       else:
-        # WTF!???  <img src="..." alt="Russell Hobbs 25710-56/RH Velocity turmixgép" "="" width="240" border="0">
-        # WTF!!!?  <span style="font-family: "playfair display", georgia, "times new roman", serif; color: #e6007e;">
-        # <div align="center" arial,="" helvetica="" helvetica,="" neue",="" sans-serif;"="" style="outline: currentcolor none 0px; font-size: 13px;
         if c==34 or c==39: # idezojelek = jel nelkul:
-            # kivetel persze ez mivel itt megengedett...
-            # <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional //EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-            if data[p+1]!=33: # !
-                warning+="WARN! %c without = at %d\n"%(c,q)
+            if data[p+1]!=33: warning+="WARN! %c without = at %d\n"%(c,q)  # <! utan oke (a doctype-ban pl. lehet), egyebkent warning
       if c==61: eqsn=True #  =
       if c==62: break     #  >
     # 
     tag=data[p+1:q-1].lower() # tag without < >
-#    print("TAG:",p,q,tag) # debug
-
-    try:
-      tag1=tag.split()[0] #.lower()
-    except:
-#      print("TAG parse error: '%s'"%(str(tag)))
-      tag1=tag
-
-#    print(tag1)
-    if tag1==b'style': in_style+=1
-    elif tag1==b'/style': in_style-=1
-    elif tag1==b'script': in_script+=1
-    elif tag1==b'/script': in_script-=1
-
+    tag1=tag.split()[0]       # az elso whitespace-ig
+    in_block= tag1 in [b'style',b'script',b'title',b'svg',b'annotation']   # TODO FIXME: svg kell ide?
+#    print("TAG:",p,q,tag1,tag) # debug
 
     # FIND next tag:
     p=data.find(b'<',q)
@@ -424,97 +382,52 @@ def html2text(data):
         p=len(data) # EOF
         break
       c=data[p+1]
-#      print(p,c)
-      if tag1 in [b'style',b'script',b'title',b'svg',b'annotation']: # TODO FIXME: svg kell ide?
-        if c==47 and data[p+2:p+2+len(tag1)].lower()==tag1:
-          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
-#          print(str(tag1)+" block found: %d-%d\n"%(q,p))
-          break # found end-tag pair
+      if in_block: # mas parser altal kezelt (js, css, svg stb) blokk veget keressuk, ebben csak a cdata-val kell foglalkozni az endtag-en kivul:
+        if c==47 and data[p+2:p+2+len(tag1)].lower()==tag1:  #  </tag1>
+#          warning+=str(tag1)+" block found: %d-%d\n"%(q,p)
+          break
         if c==33 and data[p:p+9]==b'<![CDATA[':  # https://stackoverflow.com/questions/2784183/what-does-cdata-in-xml-mean
           pp=data.find(b']]>',p)
-          warning+="CDATA block found in %s: %d-%d\n"%(str(tag1),p,pp)
-#          print("CDATA block found in %s: %d-%d\n"%(str(tag1),p,pp))
-#          error=True
+#          warning+="CDATA block found in %s: %d-%d\n"%(str(tag1),p,pp)
           if pp>0: p=pp #+3    nem szabad a kovetkezo < jelre mutatnia a p-nek, mert a loop vegen van egy find p+1 es akkor pont atugorja!!!
-        ### HTML <!-- comment tag --> should be ignored inside a style block:  https://www.w3.org/TR/CSS21/syndata.html#comments
-#        elif c==33 and data[p:p+4]==b'<!--':  # html comment?
-#          pp=data.find(b'-->',p)
-#          warning+="COMMENT block found in %s: %d-%d\n"%(str(tag1),p,pp)
-#          print("\r!!!! COMMENT block in %s: %d-%d !!!!\n"%(str(tag1),p,q))
-#          error=True
-#          if pp>0: p=pp+3
-        #else: print("WARN! skip <%c at %d in %s\n"%(c,p,str(tag1)))  # igazabol itt lehet barmi, megengedett...
+          else: warning+="WARN! missing CDATA end-tag at %d- (in %s)\n"%(p,str(tag1))
+        #else: warning+="WARN! skip <%c at %d in %s\n"%(c,p,str(tag1))   # igazabol itt lehet barmi, megengedett...
       else:
-        # <?xml:namespace prefix = "o" ns = "urn:schemas-microsoft-com:office:office" />
-        if c==47 or c==33 or 97<=c<=122 or 65<=c<=90 or c==63: break  #  </ or <! or <tag (a-z,A-Z) or <?xml
-        warning+="WARN! skip <%c at %d\n"%(c,p)
-#        print("WARN! skip <%c at %d\n"%(c,p))
+        if c==47 or c==33 or 97<=c<=122 or 65<=c<=90 or c==63: break  #  </ or <! or <tag [a-z,A-Z] or <?xml
+        warning+="WARN! skip <%c at %d\n"%(c,p)  # hibas tag formatum!
       p=data.find(b'<',p+1) # skip this < and find next one
 
+    if in_block:
+#      print("Skipping %s block at %d-%d, size=%d"%(str(tag1),q,p,p-q))  # debug
+      if p>=len(data): warning+="WARN! non-closed tag %s at %d-\n"%(str(tag1),q)  # EOF, tehat nincs meg az endtag!
+      continue
 
     txt=data[q:p]
-#    print(q,p,txt) # debug
-
-#    try:
-#      tag,txt=ret.rsplit(b'>',1) # pl.: <img width="600" height="87" alt="Csak a Minősített Fogyasztóbarát Lakáshitel érdekel >>" style="display:block...">text
-#    except:
-#      text+=ret
-#      continue
-#      print(ret.encode("utf-8"))
-#      break
-#    print("TAG: '%s'"%(tag))
-#    tag=tag.lower()
+#    print(q,p,tag1,txt) # debug
 
     if b'style' in tag: # detect hidden text!
-#  <span style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">
-#  <div style="display:none !important; font-size:1px; color:#f0f0f0; line-height:1px; font-family:arial,helvetica,sans-serif; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
-#  <div style="mso-hide:all; display:none!important; height:0; width:0px; max-height:0px; overflow:hidden; line-height:0px; float:left; font-size:0px;">
-#  Teams: <div itemprop="signedAdaptiveCard" style="mso-hide:all;display:none;max-height:0px;overflow:hidden;">eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsIng1YyI6Ik1JSUhIekND...
-# {{ uCteNf>}} Hell{{ Eywzmggb>}}o part{{ GYWmIbcB>}}ner {{ LEFWx>}} uni-obuda outgoing We are th{{ WoXAGS>}}e biggest distributor and fac{{ xRCXTNI>}}tory of or{{ TvUsbw
-# ATTN:rudas@uni-obuda.hu {{emilia daniel oscar}} How are you? Greeting from Retek Logistics This is Victoria, Wish you {{grace nancy}}to {{amy thomas}}enjoy {{arthur alex
-# <div style="font-size:0px;line-height:1px;mso-line-height-rule:exactly;display:none;max-width:0px;max-height:0px;opacity:0;overflow:hidden;mso-hide:all;">preview
-#   <span style="FONT-SIZE: 0px; FONT-FAMILY: q; LINE-HEIGHT: normal; font-stretch: normal"> random...
-#   <div class="preheader" style="display:none;font-size:1px;color:#333333;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">preview
-#  <span class="es-preheader" style="display:block !important;font-size:0px;font-color:#ffffff;">
         tag=tag.replace(b': ',b':')
-#        if b'font-size:0' in tag or b'display:none' in tag or b'max-height:0' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
         if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
-#            if len(txt.strip())>=5: 
-#            text+=b'HIDE{'+tag+b'|'+txt+b'}' # debug
             if b'display:none' in tag and len(text.strip())==0:
                 if len(txt.strip())>=3: text+=b'['+txt+b'] ' # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
 #            else:
 #                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
             continue
 
-#    print(q,p,in_style,in_script,txt) # debug
-
-#    print(tag1)
-#    print(text)
-    if in_style<=0 and in_script<=0:
-#      if tag1 in ["p","span","div"]: print(tag.lower())
-#      if tag1 in [b'p',b'br',b'td',b'div',b'li',b'pre',b'blockquote']: text+=b'\n'  # https://www.w3schools.com/html/html_blocks.asp
-      if tag==b'div' or tag1 in [b'p',b'br',b'br/',b'tr']: text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
-      else:
-#        if tag1.startswith(b'/'): tag1=tag1[1:] # closing tag
+    if tag==b'div' or tag1 in [b'p',b'br',b'br/',b'tr']:
+        text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
+    else:
         if tag1[:1]==b'/': tag1=tag1[1:] # closing tag
         if not tag1 in [b'span',b'a',b'b',b'i',b'u',b'em',b'strong',b'abbr',b'font']: text+=b' ' # not inline elements
-#      text+=txt.strip() # test/fixme
-#      text+=b' '.join(txt.split()) # whitespace...
-      text+=txt
+    text+=txt
 
-  if error:
-     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
-     fileno+=1
-
-  if in_style!=0: warning+="in_style=%d\n"%(in_style)
-  if in_script!=0: warning+="in_script=%d\n"%(in_script)
 #  if warning: text=("!!! "+warning+" !!!").encode()+text
+  if warning: print(warning)
+#  if warning:
+#     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
+#     fileno+=1
 
-#  if warning: print(warning)
-
-#  return (b' '.join(text.split())).replace(b'<BR>',b'\n')
   text=b' '.join(text.split())  # remove redundant spaces
   return b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
 
@@ -641,11 +554,11 @@ def decode_payload(data,ctyp="text/html",charset=None):
 #        origdata=str(charset).encode()+b'\n'+data
 #        data5=html2text5(data)        # html5lib version
         p=ldata.find(b'<body')
-        if p>0:
-            charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
-            data=html2text(data[p:]) # skip html header, start at <body>
-        else:
-            data=html2text(data)     # binary version
+        if p>0: charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
+        if charset and (charset.startswith("iso-2022") or charset.startswith("csiso2022")):  # https://en.wikipedia.org/wiki/ISO/IEC_2022
+            data=data.decode(charset,errors="ignore").encode("utf-8")  # japan/koreai, 7 bitbe kodolt tobb byteos karakterkodok, ESC-el stb, a html parser nem birja :)
+            charset="utf-8"
+        data=html2text(data)     # binary version!
 
     if not charset:
       charset="iso8859-2"
