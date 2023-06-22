@@ -9,8 +9,8 @@ import email.policy
 from html import unescape  #  https://docs.python.org/3/library/html.html
 #from html.entities import name2codepoint
 
-#import html5lib # testing
-# from bs4 import BeautifulSoup_
+#import html5lib # for testing
+# from bs4 import BeautifulSoup
 
 try:
   from striprtf import rtf_to_text
@@ -256,8 +256,13 @@ invalid_charrefs = {
     0x9d: '',        # <control>
     0x9e: '\u017e',  # LATIN SMALL LETTER Z WITH CARON
     0x9f: '\u0178',  # LATIN CAPITAL LETTER Y WITH DIAERESIS
-    0xA0: ' ',       # nbsp Unicode Character 'NO-BREAK SPACE' (U+00A0)
+    0xA0: ' ',       # &nbsp Unicode Character 'NO-BREAK SPACE' (U+00A0)
     0xAD: '',        # &shy SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
+    # csak ezek ternek el a magyar abc-ben a latin1 es latin2 kozott, inkabb a latin2-eset hasznaljuk ezekbol:
+    0xD5: 'Ő',       # 213 b'\xd5' Õ Õ Ő &#213; Õ
+    0xDB: 'Ű',       # 219 b'\xdb' Û Û Ű &#219; Û
+    0xF5: 'ő',       # 245 b'\xf5' õ õ ő &#245; õ
+    0xFB: 'ű',       # 251 b'\xfb' û û ű &#251; û
 }
 
 
@@ -592,7 +597,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
         data=html2text(data)     # binary version!
 
     if not charset:
-      charset="iso8859-2"
+      charset="iso8859-1"
     elif charset in charset_mapping:
       charset=charset_mapping[charset]
 
@@ -620,7 +625,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
 #    data=data.replace('\u00A0',' ').replace('\u00AD','')
     data=''.join([invalid_charrefs.get(ord(c),c) for c in data])
 
-    if data5:
+    if data5:  # compare with html5lib version, and save raw+outputs for debugging if mismatch...
       data2=" ".join(data.split())
       data5=" ".join(data5.split())
       if data2!=data5:
@@ -630,8 +635,8 @@ def decode_payload(data,ctyp="text/html",charset=None):
         open("debug_%d.txt1"%(fileno),"wt").write(data2)
         open("debug_%d.txt2"%(fileno),"wt").write(data5)
         fileno+=1
-
     return data
+
 
 def eml2str(msg):
   if isinstance(msg, io.IOBase):
@@ -715,14 +720,12 @@ def get_mimedata(eml):
     return mimeinfo,mimedata
 
 
-
-
 def vocab_split(preview):
     tok=[]
     s=""
     inw=False
     for c in preview:
-        if c in '\n\t #".,!?;:-+/*()[]0123456789':
+        if not c.isalpha(): # if c in '\n\t #".,!?;:_-+/*()[]{}0123456789':
             if inw:
                 tok.append(s)
                 s=c
