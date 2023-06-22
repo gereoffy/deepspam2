@@ -362,7 +362,11 @@ def html2text(data,debug=False):
   p=data.find(b'<')
   if p<0: return data # not html!?
   text=data[:p] # initial text before 1st tag
-  html=data[:p]
+
+  if debug:
+      html=[] if data[p:p+9]==b'<!DOCTYPE' else [b'<!DOCTYPE HTML>\n']
+      html+=[data[:p]]
+
   while p<len(data):  #for ret in data.split(b'<'):
 
     # FIND end of tag!
@@ -400,7 +404,7 @@ def html2text(data,debug=False):
 
     if debug:
       if tt<0: indent-=1
-      html+=b'%5d|'%(p)+b' '*max(0,min(48,indent)) + data[p:q].replace(b'\n',b' ')
+      html+=[b'%5d|'%(p)+b' '*max(0,min(48,indent)) + data[p:q].replace(b'\n',b' ')]
       if tt>0: indent+=1
 
     # FIND next tag:
@@ -428,8 +432,8 @@ def html2text(data,debug=False):
       p=data.find(b'<',p+1) # skip this < and find next one
 
     if debug:
-      html+=data[q:p].rstrip()+b'\n'
-      if warning: html+=b' <!> |' + warning.encode("utf-8",errors="ignore")  # beirjuk a sorok koze inkabb!
+      html+=[data[q:p].rstrip()+b'\n']
+      if warning: html+=[b' <!> |' + warning.encode("utf-8",errors="ignore")]  # beirjuk a sorok koze inkabb!
       warning=""
 
     if in_block:
@@ -458,7 +462,7 @@ def html2text(data,debug=False):
 
 #  if warning: text=("!!! "+warning+" !!!").encode()+text
 #  if debug and warning: print(warning)
-  if debug and warning: html+=b' <!> |' + warning.encode("utf-8",errors="ignore")  # beirjuk a sorok koze inkabb!
+  if debug and warning: html+=[b' <!> |' + warning.encode("utf-8",errors="ignore")]  # beirjuk a sorok koze inkabb!
 #  if warning:
 #     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
 #     fileno+=1
@@ -688,7 +692,8 @@ def get_mimedata(eml):
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
 #                    soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
 #                    pay=soup.prettify(encoding="utf-8")
-                    text,pay=html2text(pay,debug=True)  # html prettify :)
+                    dtext,dhtml=html2text(pay,debug=True)  # html prettify :)
+                    pay=b''.join(dhtml)
         mimeinfo.append(s)
 
         # Attachment file:
@@ -769,11 +774,25 @@ if __name__ == "__main__":
 #    x=parse_ics(t)
 #    print(x.decode())
 
-    t=open(sys.argv[1],"rb").read()
+#    t=open(sys.argv[1],"rb").read()
+    t=open("ALL.html","rb").read()
 #    print(decode_payload(t,ctyp="text/html",charset=None))
-    decode_payload(t,ctyp="text/html",charset=None)
+#    decode_payload(t,ctyp="text/html",charset=None)
+
+    import time
+    t0=time.time()
 
 #    t1=html2text(t)
+    t1,h1=html2text(t,debug=True)
+
+    t0=time.time()-t0
+#    print("%8.5f ms"%(t0*1000.0),len(t),len(t1))
+    h1=b''.join(h1)
+    print("%8.5f ms"%(t0*1000.0),len(t),len(t1),len(h1))
+
+#    open("ALL.out","wb").write(h1)
+    
+    
 #    t2=html2text5(t)
 #    print(len(t1),len(t2))
 #    open(sys.argv[1]+".txt1","wb").write(t1)
