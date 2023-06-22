@@ -259,10 +259,10 @@ invalid_charrefs = {
     0xA0: ' ',       # &nbsp Unicode Character 'NO-BREAK SPACE' (U+00A0)
     0xAD: '',        # &shy SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
     # csak ezek ternek el a magyar abc-ben a latin1 es latin2 kozott, inkabb a latin2-eset hasznaljuk ezekbol:
-    0xD5: 'Ő',       # 213 b'\xd5' Õ Õ Ő &#213; Õ
-    0xDB: 'Ű',       # 219 b'\xdb' Û Û Ű &#219; Û
-    0xF5: 'ő',       # 245 b'\xf5' õ õ ő &#245; õ
-    0xFB: 'ű',       # 251 b'\xfb' û û ű &#251; û
+    0xD5: '\u0150',  # O~ => O"
+    0xDB: '\u0170',  # U^ => U"
+    0xF5: '\u0151',  # o~ => o"
+    0xFB: '\u0171',  # u^ => u"
 }
 
 
@@ -516,7 +516,7 @@ def parse_ics(data):
 
     for x in ics:
 #        print(x)
-        if x[0][:11]==b'DESCRIPTION': return unescape(x[1])  # DESCRIPTION;LANGUAGE=hu-HU:Kedves Endre\,\n\n\nSzeretettel várjuk Önt a m
+        if x[0][:11]==b'DESCRIPTION': return unescape(x[1])  # DESCRIPTION;LANGUAGE=hu-HU:Kedves Endre\,\n\n\nSzeretettel
         if x[0]==b'X-ALT-DESC;FMTTYPE=text/html': return html2text(unescape(x[1]))
     return b'' #  FIXME
 
@@ -744,7 +744,6 @@ def vocab_split(preview):
 
 
 if __name__ == "__main__":
-#    s='&nbsp;&nbsp; Elküldve: 2023. május 31. 13:06:16 (UTC&#43;01:00) Belgrád, Budapest, Ljubljana, Pozsony, Prága<br>'
 #    print(s)
 #    print(xmldecode(s))
 #    print(html_unescape(s))
@@ -763,7 +762,6 @@ if __name__ == "__main__":
 #    print(t)
     import sys
 
-#    x="Gárdos Péter filmrendező-író volt Veiszer Alinda vendége, aki többek között beszélt ".encode("utf-8")
 #    print(is_utf8(x))
 #    exit(0)
 
