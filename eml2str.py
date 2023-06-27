@@ -361,7 +361,8 @@ def html2text(data,debug=False):
   
   p=data.find(b'<')
   if p<0: return data # not html!?
-  text=data[:p] # initial text before 1st tag
+  text=[data[:p]] if p>0 else []  # initial text before 1st tag
+  tlen=0 #len(data[:p].strip())
 
   if debug:
       html=[] if data[p:p+9]==b'<!DOCTYPE' else [b'<!DOCTYPE HTML>\n']
@@ -448,17 +449,19 @@ def html2text(data,debug=False):
         tag=tag.replace(b': ',b':')
         if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
-            if b'display:none' in tag and len(text.strip())==0:
-                if len(txt.strip())>=3: text+=b'['+txt+b'] ' # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
+#            if b'display:none' in tag and len(text.strip())==0:
+            if b'display:none' in tag and tlen==0:
+                if len(txt.strip())>=3: text+=[b'['+txt+b'] '] # preview header  https://responsivehtmlemail.com/html-email-preheader-text/
 #            else:
-#                if len(txt.strip())>=3: text+=b'{{'+txt+b'}}' # hidden text
+#                if len(txt.strip())>=3: text+=[b'{{'+txt+b'}}'] # hidden text
             continue
 
     if tag==b'div' or (tt>=0 and ttag in ['p','br','tr']):
-        text+=b'<BR>'  # https://www.w3schools.com/html/html_blocks.asp
+        text+=[b'<BR>']  # https://www.w3schools.com/html/html_blocks.asp
     else:
-        if not ttag in ['span','a','b','i','u','em','strong','abbr','font']: text+=b' ' # not inline elements
-    text+=txt
+        if not ttag in ['span','a','b','i','u','em','strong','abbr','font']: text+=[b' '] # not inline elements
+    text+=[txt]
+    tlen+=len(txt.strip())
 
 #  if warning: text=("!!! "+warning+" !!!").encode()+text
 #  if debug and warning: print(warning)
@@ -467,6 +470,7 @@ def html2text(data,debug=False):
 #     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
 #     fileno+=1
 
+  text=b''.join(text)
   text=b' '.join(text.split())  # remove redundant spaces
   text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
   if debug: return text, html
@@ -784,10 +788,10 @@ if __name__ == "__main__":
 
 #    t1=html2text(t)
     t1,h1=html2text(t,debug=True)
+    h1=b''.join(h1)
 
     t0=time.time()-t0
 #    print("%8.5f ms"%(t0*1000.0),len(t),len(t1))
-    h1=b''.join(h1)
     print("%8.5f ms"%(t0*1000.0),len(t),len(t1),len(h1))
 
 #    open("ALL.out","wb").write(h1)
