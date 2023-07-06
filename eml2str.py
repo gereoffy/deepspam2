@@ -360,7 +360,8 @@ def html2text(data,debug=False):
   indent=0
   
   p=data.find(b'<')
-  if p<0: return data # not html!?
+  if p<0: # not html!?
+      return (data,[data]) if debug else data
   text=[data[:p]] if p>0 else []  # initial text before 1st tag
   tlen=0 #len(data[:p].strip())
 
@@ -405,7 +406,7 @@ def html2text(data,debug=False):
 
     if debug:
       if tt<0: indent-=1
-      html+=[b'%5d|'%(p)+b' '*max(0,min(48,indent)) + data[p:q].replace(b'\n',b' ')]
+      html+=[b'%5d|'%(p)+b' '*max(0,min(64,indent)) + data[p:q].replace(b'\n',b' ')]
       if tt>0: indent+=1
 
     # FIND next tag:
