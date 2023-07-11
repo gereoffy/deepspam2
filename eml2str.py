@@ -6,6 +6,9 @@ import zipfile
 import email
 import email.policy
 
+import quopri
+import base64
+
 from html import unescape  #  https://docs.python.org/3/library/html.html
 #from html.entities import name2codepoint
 
@@ -753,20 +756,25 @@ def vocab_split(preview):
     return tok
 
 
+# parses "Content-*: value; option2=value2" type headers to dict
 def parse_ctyp(data):
-    # b'multipart/mixed; boundary="000000000000dc907a05c25d1a55"'
-#    if debug: print(ct)
-    ct=None
-    for c in data.split(b';'):
-        c=c.strip().split(b'=',1)
-        if not ct: ct={"_":c}
-        else:
-            v=c[1].strip()
-            if v and v[0] in [34,39] and v[-1]==v[0]: v=v[1:-1] # idezojelek levagasa
-            ct[c[0].strip().lower()]=v
+    try:
+      ct={}
+      for c in data.split(b';'):
+        c=c.strip()
+        if not c: continue
+        c=c.split(b'=',1) if ct else [b'_',c]
+        v=c[1].strip()
+        if v and v[0] in [34,39]: v=v[1:v.find(v[:1],1)] # idezojelek levagasa
+        ct[c[0].strip().lower()]=v
+    except Exception as e:
+      print(data[:100])
+      print(ct)
+      print("parse_ctyp EXC:",repr(e))
     return ct
 
-def parse_eml(data,level=0,debug=True):
+
+def parse_eml(data,level=0,debug=False):
     # find header size:
     hsize=data.find(b'\r\n\r\n')+4
     if hsize<4: hsize=len(data)
@@ -787,24 +795,46 @@ def parse_eml(data,level=0,debug=True):
         hdr=line
         if len(line)==0: break
 #    print(hdr)
-    
-    # content-type?
-    ct=None # ctype,encoding,boundary,filename
+
+#Content-Type: image/jpeg; name="live.jpg"
+#Content-Disposition: attachment; filename="live.jpg"
+#Content-Transfer-Encoding: base64
+#Content-ID: <f_kopp3nr60>
+
+    ct=None
+    cd=None
+    ce=None
     for hdr in headers:
         h=hdr.split(b':',1)
 #        if debug: print(h)
         if h[0].lower()==b'content-type': ct=parse_ctyp(h[1])
-    print(level,ct)
+        if h[0].lower()==b'content-disposition': cd=parse_ctyp(h[1])
+        if h[0].lower()==b'content-transfer-encoding': ce=parse_ctyp(h[1])
+    if debug: print(level,ct,cd,ce)
+
+    eml={"headers":headers, "hsize":hsize, "ct":ct,"cd":cd,"ce":ce, "parts":[], "raw":data }
+
+    data=data[hsize:]
 
     if ct and b'boundary' in ct:
         # split by boundary
         bo=b'--'+ct[b'boundary']
-        for part in data[hsize:].split(bo):
+        for part in data.split(bo):
             part=part.lstrip()
             if not part or part.strip()==b'--': continue # fixme: speed optim for large parts
 #            print(level,len(part),part[:50],"...",part[-50:])
-            parse_eml(part,level+1)
+            pe=parse_eml(part,level+1,debug)
+            eml["parts"].append(pe)
+    else:
+        # data, decode?
+        if ce and ce.get(b'_',b'').lower()==b'base64':
+            eml["payload"]=base64.b64decode(data)
+#            print("B64-Decoded %d bytes"%(len(data)))
+        elif ce and ce.get(b'_',b'').lower()==b'quoted-printable':
+            eml["payload"]=quopri.decodestring(data)
+#            print("QP-Decoded %d bytes"%(len(data)))
 
+    return eml
 
 
 if __name__ == "__main__":
@@ -837,7 +867,12 @@ if __name__ == "__main__":
 #    t=open("ALL.html","rb").read()
     
     t=open("big1.eml","rb").read()
-    parse_eml(t)
+    eml=parse_eml(t,debug=True)
+    
+    def walk(eml,level=0):
+        print(level,len(eml["raw"]),len(eml["headers"]), eml.keys())
+        for e in eml["parts"]: walk(e,level+1)
+    walk(eml)
     
     
 #    print(decode_payload(t,ctyp="text/html",charset=None))
