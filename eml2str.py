@@ -784,7 +784,8 @@ def parse_eml(data,level=0,debug=False,decode=False):
     hsize2=data.find(b'\r\n\r\n')+4
     newline=b'\n'
     if hsize2>=4 and hsize2<hsize: hsize,newline=hsize2,b'\r\n'
-    print(hsize, len(data), newline)
+#    print("parse_eml:", hsize, len(data), newline, data[:32],data[hsize:hsize+32],data[-32:])
+#    if level>0 and not data.startswith(b'Content-') and b'Content-' in data: print("BadHeader:",data[:120]) # MIME-Version: es Date: is szokott lenni legelol...
 
     # process headers
     headers=[]
@@ -797,13 +798,9 @@ def parse_eml(data,level=0,debug=False,decode=False):
         if hdr: headers.append(hdr)
         hdr=line
         if len(line)==0: break
-#    print(hdr)
+#    if hdr: print("HeaderParseErr:",hdr)
 
-#Content-Type: image/jpeg; name="live.jpg"
-#Content-Disposition: attachment; filename="live.jpg"
-#Content-Transfer-Encoding: base64
-#Content-ID: <f_kopp3nr60>
-
+    # parse Content-*: headers (get type/encoding/charset/filename)
     ct={}
     for hdr in headers:
         h=hdr.split(b':',1)
@@ -811,7 +808,7 @@ def parse_eml(data,level=0,debug=False,decode=False):
         if h[0].lower()==b'content-type': parse_ctyp(h[1],b'_ct',ct)
         if h[0].lower()==b'content-disposition': parse_ctyp(h[1],b'_cd',ct)
         if h[0].lower()==b'content-transfer-encoding': parse_ctyp(h[1],b'_ce',ct)
-    if debug: print(level,ct)
+    if debug: print(level,hsize,len(data),ct)
 
     ctyp=ct.get(b'_ct',b'text/plain')
     eml={"headers":headers, "hsize":hsize, "ct":ct, "ctyp":ctyp, "parts":[], "raw":data }
@@ -825,15 +822,36 @@ def parse_eml(data,level=0,debug=False,decode=False):
 #      1 MULTI: b'multipart/digest'
 #      1 MULTI: b'multipart/parallel'
     if b'boundary' in ct and ctyp.startswith(b'multipart/'):
-        # split by boundary
-        bo=b'--'+ct[b'boundary']+newline
-        if not bo in data: print("BoundaryNotFound:",bo, data[:100])
-        for part in data.split(bo):
-            part=part.lstrip()
-            if not part or part[:80].strip()==b'--': continue
-#            print(level,len(part),part[:50],"...",part[-50:])
-            pe=parse_eml(part,level+1,debug)
-            eml["parts"].append(pe)
+        # split data by boundary to parts
+        bo=b'--'+ct[b'boundary']
+        p=q=0
+        while p<len(data):
+            p=data.find(bo,p)
+            if p<0: # process data after the last boundary: (the end-boundary tag is missing too often...)
+                if q==0: print("BoundaryNotFound:",bo, data[:100])
+                p=len(data)
+                if data[q:q+8]!=b'Content-': print("PostBoundaryText:",q,p,len(data), data[q:])
+            pp=p # pp->start of next boundary
+            p+=len(bo)
+            if data[p:p+2]==b'--': p+=2 # end boundary
+#            print(q,pp,p,bo,data[p:p+10])
+            #  (p->end of next boundary)
+            if p>=len(data) or data[p]<=32 or data[p:p+8]==b'Content-': # boundary string at EOF or followed by newline/whitespace or Content-*
+                # found!
+                part=data[q:pp]
+                if part and len(part.strip())>2: # not empty block
+                    if q==0 and b'Content-Type:' in part: # headers before first boundary!
+                        q=part.find(b'Content-')  # workaround buggy emails
+                        print("BoundaryFixCont:",q,part)
+                    if q>0 or len(part)>=300 or not (b'MIME' in part or b'multipart message' in part.lower() or b' mime format' in part.lower()): # skip empty/useless compatibility text!
+                        if q==0: print("PreBoundaryText:",len(part),part)
+                        pe=parse_eml(part,level+1,debug)
+                        eml["parts"].append(pe)
+#                    else: print("SkipUseless:",len(part),part)
+                while p<len(data) and data[p]<=32: p+=1 # skip whitespace
+                q=p
+            elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,p,len(data),bo,data[p:p+10])
+
     elif decode:
         # data, decode?
         if ct.get(b'_ce',b'').lower()==b'base64':
@@ -886,7 +904,7 @@ if __name__ == "__main__":
 #    t=open(sys.argv[1],"rb").read()
 #    t=open("ALL.html","rb").read()
     
-    t=open("big2.eml","rb").read()
+    t=open("hibas.eml","rb").read()
     eml=parse_eml(t,debug=True)
     
     def walk(eml,level=0):
