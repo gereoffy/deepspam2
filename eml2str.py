@@ -6,7 +6,7 @@ import zipfile
 import email
 import email.policy
 
-import quopri
+from binascii import a2b_qp,a2b_base64
 import base64
 
 from html import unescape  #  https://docs.python.org/3/library/html.html
@@ -765,7 +765,7 @@ def parse_ctyp(data,hdr=b'_',ct=None):
         c=c.strip()
         if not c: continue
 #        print(c,ct)
-        c=c.split(b'=',1) if hdr in ct else [hdr,c.lower()]
+        c=c.split(b'=',1) if hdr in ct else [hdr,c]
         if len(c)!=2:
             print("BadCTParameter:",c,data)
             continue # FIXME
@@ -780,7 +780,7 @@ def parse_ctyp(data,hdr=b'_',ct=None):
 
 
 # reference implementation using email library... only for testing!
-def parse_eml_ref(data,level=0,debug=False,decode=False):
+def parse_eml_ref(data,debug=False,decode=False,level=0):
     def walker(msg,level=0):
 #        print(" "*(level*3), msg.is_multipart(), msg.get_content_type(), msg.get_content_charset(), msg.is_attachment(), msg.get_filename())
 #        s=" "*(level*3) + "Multi:"+str(msg.is_multipart())+"  "+str(msg.get_content_type())
@@ -798,7 +798,26 @@ def parse_eml_ref(data,level=0,debug=False,decode=False):
     return walker(msg)
 
 
-def parse_eml(data,debug=False,level=0,decode=False,p=0,pend=-1):
+#   4562 Encoding: b'7bit'
+#  20094 Encoding: b'8bit'
+#  15149 Encoding: b'base64'
+#  47887 Encoding: b'quoted-printable'
+#     74 Encoding: b'binary' Ez a main headerben van, de minek?
+#      2 Encoding: b'hexa'   ???  base64-nek nez ki pedig.
+#    376 Encoding: b'utf-8'  WTF?  ez nincs enkodolva
+
+def decode_payload(data,encoding):
+    try:
+        if encoding=='base64': return a2b_base64(data)
+        if encoding=='quoted-printable': return a2b_qp(data)
+    except Exception as e:
+        print("PayloadDecodingExc:",repr(e))
+#    if not encoding in ['7bit','8bit','binary','utf-8']: print("UnknownEncoding:",encoding)
+    if not encoding in ['7bit','8bit','utf-8']: print("UnknownEncoding:",encoding)
+    return data
+
+
+def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     if pend<0: pend=len(data)
     
     # find header size:
@@ -833,8 +852,9 @@ def parse_eml(data,debug=False,level=0,decode=False,p=0,pend=-1):
         if h[0].lower()==b'content-transfer-encoding': parse_ctyp(h[1],b'_ce',ct)
     if debug: print(level,hsize,len(data),ct)
 
-    ctyp=ct.get(b'_ct',b'').decode("us-ascii",errors="ignore")
-    eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "parts":[]} # , "raw":data
+    ctyp=ct.get(b'_ct',b'').decode("us-ascii",errors="ignore").lower()
+    cenc=ct.get(b'_ce',b'').decode("us-ascii",errors="ignore").lower()
+    eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "encoding":cenc, "parts":[]} # , "raw":data
 
 #  27140 MULTI: b'multipart/alternative'
 #   1388 MULTI: b'multipart/mixed'
@@ -857,6 +877,7 @@ def parse_eml(data,debug=False,level=0,decode=False,p=0,pend=-1):
             elif pp>0 and data[pp-1]==10:  # backward skip pre-boundary newline...  for compatibility with email lib :(
                 pp-=1
                 if pp>0 and data[pp-1]==13: pp-=1
+            else: print("BoundaryNoNewline:",q,pp,pend,bo)
             p+=len(bo)
             if data[p:p+2]==b'--': p+=2 # end boundary
 #            print(q,pp,p,bo,data[p:p+10])
@@ -871,7 +892,7 @@ def parse_eml(data,debug=False,level=0,decode=False,p=0,pend=-1):
                         first=False
                     if not first or len(part)>=300 or not (b'MIME' in part or b'multipart message' in part.lower() or b' mime format' in part.lower()): # skip empty/useless compatibility text!
                         if first: print("PreBoundaryText:",len(part),part)
-                        pe=parse_eml(data,debug,level+1,p=q,pend=pp)
+                        pe=parse_eml(data,debug,decode,level+1,p=q,pend=pp)
                         eml["parts"].append(pe)
 #                    else: print("SkipUseless:",len(part),part)
                 while p<pend and data[p]<=32: p+=1 # skip whitespace
@@ -882,29 +903,12 @@ def parse_eml(data,debug=False,level=0,decode=False,p=0,pend=-1):
     elif ctyp.startswith('message/'):
         # message/disposition-notification
         # message/rfc822
-        pe=parse_eml(data,debug,level+1,p=hsize,pend=pend)
+        pe=parse_eml(data,debug,decode,level+1,p=hsize,pend=pend)
         eml["parts"].append(pe)
     elif decode:
         # data, decode?
-        if ct.get(b'_ce',b'').lower()==b'base64':
-            eml["payload"]=base64.b64decode(data[hsize:pend])
-#            print("B64-Decoded %d bytes"%(len(data)))
-        elif ct.get(b'_ce',b'').lower()==b'quoted-printable':
-            eml["payload"]=quopri.decodestring(data[hsize:pend])
-#            print("QP-Decoded %d bytes"%(len(data)))
-        else:
-            if not ctyp and len(data[hsize:pend].strip())<3:
-                  eml["payload"]=data[p:pend] # no headers, no body...
-            else: eml["payload"]=data[hsize:pend]
-
-#    if b'_ce' in ct: print("Encoding:",ct[b'_ce'])
-#   4562 Encoding: b'7bit'
-#  20094 Encoding: b'8bit'
-#  15149 Encoding: b'base64'
-#  47887 Encoding: b'quoted-printable'
-#     74 Encoding: b'binary' Ez a main headerben van, de minek?
-#      2 Encoding: b'hexa'   ???  base64-nek nez ki pedig.
-#    376 Encoding: b'utf-8'  WTF?  ez nincs enkodolva
+        eml["payload"]=decode_payload(data[hsize:pend], cenc)
+        if not ctyp and len(eml["payload"].strip())<3: eml["payload"]=data[p:pend] # no headers, no body...
 
     return eml
 
@@ -938,22 +942,22 @@ if __name__ == "__main__":
 #    t=open(sys.argv[1],"rb").read()
 #    t=open("ALL.html","rb").read()
     
-    t=open("bound.eml","rb").read()
+    t=open("disposition2.eml","rb").read()
 #    eml=parse_eml_ref(t,debug=False)
     
     def walk(eml,level=0):
 #        if eml["ctyp"].startswith("multipart/") or eml["ctyp"].startswith("message/"):
 #            print(level,eml["ctyp"])
 #        else:
-        print(level,eml["size"],eml["ctyp"])
+        print(level,eml["size"],len(eml.get("payload",b'')),eml["ctyp"])
         for e in eml["parts"]: walk(e,level+1)
 #        if eml["ctyp"]=="text/plain": print(eml["raw"])
 
-    eml=parse_eml(t,debug=True)
+    eml=parse_eml(t,debug=True,decode=True)
     walk(eml)
 
     print("--- reference: ---")
-    eml=parse_eml_ref(t,debug=False)
+    eml=parse_eml_ref(t,debug=False,decode=True)
     walk(eml)
     
 #    print(decode_payload(t,ctyp="text/html",charset=None))
