@@ -766,7 +766,9 @@ def parse_ctyp(data,hdr=b'_',ct=None):
         if not c: continue
 #        print(c,ct)
         c=c.split(b'=',1) if hdr in ct else [hdr,c.lower()]
-        if len(c)!=2: continue # FIXME
+        if len(c)!=2:
+            print("BadCTParameter:",c,data)
+            continue # FIXME
         v=c[1].strip()
         if v and v[0] in [34,39]: v=v[1:v.find(v[:1],1)] # idezojelek levagasa
         ct[c[0].strip().lower()]=v
@@ -775,6 +777,25 @@ def parse_ctyp(data,hdr=b'_',ct=None):
 #      print(ct)
 #      print("parse_ctyp EXC:",repr(e))
     return ct
+
+
+# reference implementation using email library... only for testing!
+def parse_eml_ref(data,level=0,debug=False,decode=False):
+    def walker(msg,level=0):
+#        print(" "*(level*3), msg.is_multipart(), msg.get_content_type(), msg.get_content_charset(), msg.is_attachment(), msg.get_filename())
+#        s=" "*(level*3) + "Multi:"+str(msg.is_multipart())+"  "+str(msg.get_content_type())
+        ctyp=msg.get_content_type()
+#        cset=msg.get_content_charset()
+        raw=msg.as_bytes()
+        eml={ "ctyp":ctyp, "parts":[], "raw":raw }
+        if msg.is_multipart():
+            for subpart in msg.get_payload():  # az iter_parts() bugos, csak multipartra jo, message/rfc-re NEM!!!
+                eml["parts"].append(walker(subpart,level+1))
+        else:
+            if decode: eml["payload"]=msg.get_payload(decode=True)
+        return eml
+    msg = email.message_from_bytes(data, policy=email.policy.default)
+    return walker(msg)
 
 
 def parse_eml(data,level=0,debug=False,decode=False):
@@ -810,7 +831,7 @@ def parse_eml(data,level=0,debug=False,decode=False):
         if h[0].lower()==b'content-transfer-encoding': parse_ctyp(h[1],b'_ce',ct)
     if debug: print(level,hsize,len(data),ct)
 
-    ctyp=ct.get(b'_ct',b'text/plain')
+    ctyp=ct.get(b'_ct',b'text/plain').decode("us-ascii",errors="ignore")
     eml={"headers":headers, "hsize":hsize, "ct":ct, "ctyp":ctyp, "parts":[], "raw":data }
 
     data=data[hsize:]
@@ -821,7 +842,7 @@ def parse_eml(data,level=0,debug=False,decode=False):
 #     23 MULTI: b'multipart/report'
 #      1 MULTI: b'multipart/digest'
 #      1 MULTI: b'multipart/parallel'
-    if b'boundary' in ct and ctyp.startswith(b'multipart/'):
+    if b'boundary' in ct and ctyp.startswith('multipart/'):
         # split data by boundary to parts
         bo=b'--'+ct[b'boundary']
         p=q=0
@@ -832,6 +853,9 @@ def parse_eml(data,level=0,debug=False,decode=False):
                 p=len(data)
                 if data[q:q+8]!=b'Content-': print("PostBoundaryText:",q,p,len(data), data[q:])
             pp=p # pp->start of next boundary
+            if pp>0 and data[pp-1]==10:  # backward skip pre-boundary newline...  for compatibility with email lib :(
+                pp-=1
+                if pp>0 and data[pp-1]==13: pp-=1
             p+=len(bo)
             if data[p:p+2]==b'--': p+=2 # end boundary
 #            print(q,pp,p,bo,data[p:p+10])
@@ -852,6 +876,11 @@ def parse_eml(data,level=0,debug=False,decode=False):
                 q=p
             elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,p,len(data),bo,data[p:p+10])
 
+    elif ctyp.startswith('message/'):
+        # message/disposition-notification
+        # message/rfc822
+        pe=parse_eml(data,level+1,debug)
+        eml["parts"].append(pe)
     elif decode:
         # data, decode?
         if ct.get(b'_ce',b'').lower()==b'base64':
@@ -904,14 +933,25 @@ if __name__ == "__main__":
 #    t=open(sys.argv[1],"rb").read()
 #    t=open("ALL.html","rb").read()
     
-    t=open("hibas.eml","rb").read()
-    eml=parse_eml(t,debug=True)
+    t=open("disposition1.eml","rb").read()
+#    eml=parse_eml_ref(t,debug=False)
     
     def walk(eml,level=0):
-        print(level,len(eml["raw"]),len(eml["headers"]), eml.keys())
+#        if eml["ctyp"].startswith("multipart/") or eml["ctyp"].startswith("message/"):
+#            print(level,eml["ctyp"])
+#        else:
+        print(level,len(eml["raw"]),eml["ctyp"])
         for e in eml["parts"]: walk(e,level+1)
+        if eml["ctyp"]=="text/plain": print(eml["raw"])
+
+    eml=parse_eml(t,debug=True)
     walk(eml)
-    
+    open("___1.raw","wb").write(eml["raw"])
+
+    print("--- reference: ---")
+    eml=parse_eml_ref(t,debug=False)
+    walk(eml)
+    open("___2.raw","wb").write(eml["raw"])
     
 #    print(decode_payload(t,ctyp="text/html",charset=None))
 #    decode_payload(t,ctyp="text/html",charset=None)
