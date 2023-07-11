@@ -237,9 +237,9 @@ invalid_charrefs = {
     0x8a: '\u0160',  # LATIN CAPITAL LETTER S WITH CARON
     0x8b: '\u2039',  # SINGLE LEFT-POINTING ANGLE QUOTATION MARK
     0x8c: '\u0152',  # LATIN CAPITAL LIGATURE OE
-    0x8d: '',        # <control>
+    0x8d: '\u0164',  # CP1250-bol :)
     0x8e: '\u017d',  # LATIN CAPITAL LETTER Z WITH CARON
-    0x8f: '',        # <control>
+    0x8f: '\u0179',  # CP1250-bol :)
     0x90: '',        # <control>
     0x91: '\u2018',  # LEFT SINGLE QUOTATION MARK
     0x92: '\u2019',  # RIGHT SINGLE QUOTATION MARK
@@ -253,7 +253,7 @@ invalid_charrefs = {
     0x9a: '\u0161',  # LATIN SMALL LETTER S WITH CARON
     0x9b: '\u203a',  # SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
     0x9c: '\u0153',  # LATIN SMALL LIGATURE OE
-    0x9d: '',        # <control>
+    0x9d: '\u0165',  # CP1250-bol :)
     0x9e: '\u017e',  # LATIN SMALL LETTER Z WITH CARON
     0x9f: '\u0178',  # LATIN CAPITAL LETTER Y WITH DIAERESIS
     0xA0: ' ',       # &nbsp Unicode Character 'NO-BREAK SPACE' (U+00A0)
@@ -753,6 +753,60 @@ def vocab_split(preview):
     return tok
 
 
+def parse_ctyp(data):
+    # b'multipart/mixed; boundary="000000000000dc907a05c25d1a55"'
+#    if debug: print(ct)
+    ct=None
+    for c in data.split(b';'):
+        c=c.strip().split(b'=',1)
+        if not ct: ct={"_":c}
+        else:
+            v=c[1].strip()
+            if v and v[0] in [34,39] and v[-1]==v[0]: v=v[1:-1] # idezojelek levagasa
+            ct[c[0].strip().lower()]=v
+    return ct
+
+def parse_eml(data,level=0,debug=True):
+    # find header size:
+    hsize=data.find(b'\r\n\r\n')+4
+    if hsize<4: hsize=len(data)
+    hsize2=data.find(b'\n\n')+2
+    if hsize2<2: hsize2=len(data)
+    if hsize2<hsize: hsize=hsize2
+#    print(hsize)
+
+    # process headers
+    headers=[]
+    hdr=None
+    for rawline in data[:hsize].split(b'\n'):
+        line=rawline.rstrip(b'\r')
+        if line and line[0] in [9,32]:
+            hdr+=b' '+line.lstrip(b'\t ')
+            continue
+        if hdr: headers.append(hdr)
+        hdr=line
+        if len(line)==0: break
+#    print(hdr)
+    
+    # content-type?
+    ct=None # ctype,encoding,boundary,filename
+    for hdr in headers:
+        h=hdr.split(b':',1)
+#        if debug: print(h)
+        if h[0].lower()==b'content-type': ct=parse_ctyp(h[1])
+    print(level,ct)
+
+    if ct and b'boundary' in ct:
+        # split by boundary
+        bo=b'--'+ct[b'boundary']
+        for part in data[hsize:].split(bo):
+            part=part.lstrip()
+            if not part or part.strip()==b'--': continue # fixme: speed optim for large parts
+#            print(level,len(part),part[:50],"...",part[-50:])
+            parse_eml(part,level+1)
+
+
+
 if __name__ == "__main__":
 #    print(s)
 #    print(xmldecode(s))
@@ -780,20 +834,25 @@ if __name__ == "__main__":
 #    print(x.decode())
 
 #    t=open(sys.argv[1],"rb").read()
-    t=open("ALL.html","rb").read()
+#    t=open("ALL.html","rb").read()
+    
+    t=open("big1.eml","rb").read()
+    parse_eml(t)
+    
+    
 #    print(decode_payload(t,ctyp="text/html",charset=None))
 #    decode_payload(t,ctyp="text/html",charset=None)
 
-    import time
-    t0=time.time()
+#    import time
+#    t0=time.time()
 
 #    t1=html2text(t)
-    t1,h1=html2text(t,debug=True)
-    h1=b''.join(h1)
+#    t1,h1=html2text(t,debug=True)
+#    h1=b''.join(h1)
 
-    t0=time.time()-t0
+#    t0=time.time()-t0
 #    print("%8.5f ms"%(t0*1000.0),len(t),len(t1))
-    print("%8.5f ms"%(t0*1000.0),len(t),len(t1),len(h1))
+#    print("%8.5f ms"%(t0*1000.0),len(t),len(t1),len(h1))
 
 #    open("ALL.out","wb").write(h1)
     
