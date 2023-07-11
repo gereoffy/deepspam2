@@ -757,31 +757,34 @@ def vocab_split(preview):
 
 
 # parses "Content-*: value; option2=value2" type headers to dict
-def parse_ctyp(data):
-    try:
-      ct={}
-      for c in data.split(b';'):
+def parse_ctyp(data,hdr=b'_',ct=None):
+    if ct==None: ct={}
+#    print(ct,hdr,data)
+#  try:
+    for c in data.split(b';'):
         c=c.strip()
         if not c: continue
-        c=c.split(b'=',1) if ct else [b'_',c]
+#        print(c,ct)
+        c=c.split(b'=',1) if hdr in ct else [hdr,c.lower()]
+        if len(c)!=2: continue # FIXME
         v=c[1].strip()
         if v and v[0] in [34,39]: v=v[1:v.find(v[:1],1)] # idezojelek levagasa
         ct[c[0].strip().lower()]=v
-    except Exception as e:
-      print(data[:100])
-      print(ct)
-      print("parse_ctyp EXC:",repr(e))
+#    except Exception as e:
+#      print(data[:100])
+#      print(ct)
+#      print("parse_ctyp EXC:",repr(e))
     return ct
 
 
-def parse_eml(data,level=0,debug=False):
+def parse_eml(data,level=0,debug=False,decode=False):
     # find header size:
-    hsize=data.find(b'\r\n\r\n')+4
-    if hsize<4: hsize=len(data)
-    hsize2=data.find(b'\n\n')+2
-    if hsize2<2: hsize2=len(data)
-    if hsize2<hsize: hsize=hsize2
-#    print(hsize)
+    hsize=data.find(b'\n\n')+2
+    if hsize<2: hsize=len(data)
+    hsize2=data.find(b'\r\n\r\n')+4
+    newline=b'\n'
+    if hsize2>=4 and hsize2<hsize: hsize,newline=hsize2,b'\r\n'
+    print(hsize, len(data), newline)
 
     # process headers
     headers=[]
@@ -801,38 +804,55 @@ def parse_eml(data,level=0,debug=False):
 #Content-Transfer-Encoding: base64
 #Content-ID: <f_kopp3nr60>
 
-    ct=None
-    cd=None
-    ce=None
+    ct={}
     for hdr in headers:
         h=hdr.split(b':',1)
 #        if debug: print(h)
-        if h[0].lower()==b'content-type': ct=parse_ctyp(h[1])
-        if h[0].lower()==b'content-disposition': cd=parse_ctyp(h[1])
-        if h[0].lower()==b'content-transfer-encoding': ce=parse_ctyp(h[1])
-    if debug: print(level,ct,cd,ce)
+        if h[0].lower()==b'content-type': parse_ctyp(h[1],b'_ct',ct)
+        if h[0].lower()==b'content-disposition': parse_ctyp(h[1],b'_cd',ct)
+        if h[0].lower()==b'content-transfer-encoding': parse_ctyp(h[1],b'_ce',ct)
+    if debug: print(level,ct)
 
-    eml={"headers":headers, "hsize":hsize, "ct":ct,"cd":cd,"ce":ce, "parts":[], "raw":data }
+    ctyp=ct.get(b'_ct',b'text/plain')
+    eml={"headers":headers, "hsize":hsize, "ct":ct, "ctyp":ctyp, "parts":[], "raw":data }
 
     data=data[hsize:]
 
-    if ct and b'boundary' in ct:
+#  27140 MULTI: b'multipart/alternative'
+#   1388 MULTI: b'multipart/mixed'
+#   1701 MULTI: b'multipart/related'
+#     23 MULTI: b'multipart/report'
+#      1 MULTI: b'multipart/digest'
+#      1 MULTI: b'multipart/parallel'
+    if b'boundary' in ct and ctyp.startswith(b'multipart/'):
         # split by boundary
-        bo=b'--'+ct[b'boundary']
+        bo=b'--'+ct[b'boundary']+newline
+        if not bo in data: print("BoundaryNotFound:",bo, data[:100])
         for part in data.split(bo):
             part=part.lstrip()
-            if not part or part.strip()==b'--': continue # fixme: speed optim for large parts
+            if not part or part[:80].strip()==b'--': continue
 #            print(level,len(part),part[:50],"...",part[-50:])
             pe=parse_eml(part,level+1,debug)
             eml["parts"].append(pe)
-    else:
+    elif decode:
         # data, decode?
-        if ce and ce.get(b'_',b'').lower()==b'base64':
+        if ct.get(b'_ce',b'').lower()==b'base64':
             eml["payload"]=base64.b64decode(data)
-#            print("B64-Decoded %d bytes"%(len(data)))
-        elif ce and ce.get(b'_',b'').lower()==b'quoted-printable':
+            print("B64-Decoded %d bytes"%(len(data)))
+        elif ct.get(b'_ce',b'').lower()==b'quoted-printable':
             eml["payload"]=quopri.decodestring(data)
-#            print("QP-Decoded %d bytes"%(len(data)))
+            print("QP-Decoded %d bytes"%(len(data)))
+        else:
+            eml["payload"]=data
+
+#    if b'_ce' in ct: print("Encoding:",ct[b'_ce'])
+#   4562 Encoding: b'7bit'
+#  20094 Encoding: b'8bit'
+#  15149 Encoding: b'base64'
+#  47887 Encoding: b'quoted-printable'
+#     74 Encoding: b'binary' Ez a main headerben van, de minek?
+#      2 Encoding: b'hexa'   ???  base64-nek nez ki pedig.
+#    376 Encoding: b'utf-8'  WTF?  ez nincs enkodolva
 
     return eml
 
@@ -866,7 +886,7 @@ if __name__ == "__main__":
 #    t=open(sys.argv[1],"rb").read()
 #    t=open("ALL.html","rb").read()
     
-    t=open("big1.eml","rb").read()
+    t=open("big2.eml","rb").read()
     eml=parse_eml(t,debug=True)
     
     def walk(eml,level=0):
