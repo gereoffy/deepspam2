@@ -787,7 +787,7 @@ def parse_eml_ref(data,level=0,debug=False,decode=False):
         ctyp=msg.get_content_type()
 #        cset=msg.get_content_charset()
         raw=msg.as_bytes()
-        eml={ "ctyp":ctyp, "parts":[], "raw":raw }
+        eml={ "ctyp":ctyp, "parts":[], "raw":raw, "size":len(raw) }
         if msg.is_multipart():
             for subpart in msg.get_payload():  # az iter_parts() bugos, csak multipartra jo, message/rfc-re NEM!!!
                 eml["parts"].append(walker(subpart,level+1))
@@ -798,11 +798,13 @@ def parse_eml_ref(data,level=0,debug=False,decode=False):
     return walker(msg)
 
 
-def parse_eml(data,level=0,debug=False,decode=False):
+def parse_eml(data,debug=False,level=0,decode=False,p=0,pend=-1):
+    if pend<0: pend=len(data)
+    
     # find header size:
-    hsize=data.find(b'\n\n')+2
-    if hsize<2: hsize=len(data)
-    hsize2=data.find(b'\r\n\r\n')+4
+    hsize=data.find(b'\n\n',p,pend)+2
+    if hsize<2: hsize=pend
+    hsize2=data.find(b'\r\n\r\n',p,pend)+4
     newline=b'\n'
     if hsize2>=4 and hsize2<hsize: hsize,newline=hsize2,b'\r\n'
 #    print("parse_eml:", hsize, len(data), newline, data[:32],data[hsize:hsize+32],data[-32:])
@@ -811,7 +813,7 @@ def parse_eml(data,level=0,debug=False,decode=False):
     # process headers
     headers=[]
     hdr=None
-    for rawline in data[:hsize].split(b'\n'):
+    for rawline in data[p:hsize].split(b'\n'):
         line=rawline.rstrip(b'\r')
         if line and line[0] in [9,32]:
             hdr+=b' '+line.lstrip(b'\t ')
@@ -831,10 +833,8 @@ def parse_eml(data,level=0,debug=False,decode=False):
         if h[0].lower()==b'content-transfer-encoding': parse_ctyp(h[1],b'_ce',ct)
     if debug: print(level,hsize,len(data),ct)
 
-    ctyp=ct.get(b'_ct',b'text/plain').decode("us-ascii",errors="ignore")
-    eml={"headers":headers, "hsize":hsize, "ct":ct, "ctyp":ctyp, "parts":[], "raw":data }
-
-    data=data[hsize:]
+    ctyp=ct.get(b'_ct',b'').decode("us-ascii",errors="ignore")
+    eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "parts":[]} # , "raw":data
 
 #  27140 MULTI: b'multipart/alternative'
 #   1388 MULTI: b'multipart/mixed'
@@ -845,15 +845,16 @@ def parse_eml(data,level=0,debug=False,decode=False):
     if b'boundary' in ct and ctyp.startswith('multipart/'):
         # split data by boundary to parts
         bo=b'--'+ct[b'boundary']
-        p=q=0
-        while p<len(data):
-            p=data.find(bo,p)
-            if p<0: # process data after the last boundary: (the end-boundary tag is missing too often...)
-                if q==0: print("BoundaryNotFound:",bo, data[:100])
-                p=len(data)
-                if data[q:q+8]!=b'Content-': print("PostBoundaryText:",q,p,len(data), data[q:])
+        q=p=hsize # data=data[hsize:]
+        first=True
+        while p<pend:
+            p=data.find(bo,p,pend)
             pp=p # pp->start of next boundary
-            if pp>0 and data[pp-1]==10:  # backward skip pre-boundary newline...  for compatibility with email lib :(
+            if p<0: # process data after the last boundary: (the end-boundary tag is missing too often...)
+                if first: print("BoundaryNotFound:",bo) #, data[:100])
+                pp=p=pend
+                if data[q:q+8]!=b'Content-': print("PostBoundaryText:",q,p,len(data), data[q:pend])
+            elif pp>0 and data[pp-1]==10:  # backward skip pre-boundary newline...  for compatibility with email lib :(
                 pp-=1
                 if pp>0 and data[pp-1]==13: pp-=1
             p+=len(bo)
@@ -864,33 +865,37 @@ def parse_eml(data,level=0,debug=False,decode=False):
                 # found!
                 part=data[q:pp]
                 if part and len(part.strip())>2: # not empty block
-                    if q==0 and b'Content-Type:' in part: # headers before first boundary!
-                        q=part.find(b'Content-')  # workaround buggy emails
-                        print("BoundaryFixCont:",q,part)
-                    if q>0 or len(part)>=300 or not (b'MIME' in part or b'multipart message' in part.lower() or b' mime format' in part.lower()): # skip empty/useless compatibility text!
-                        if q==0: print("PreBoundaryText:",len(part),part)
-                        pe=parse_eml(part,level+1,debug)
+                    if first and b'Content-Type:' in part: # headers before first boundary!
+                        q+=part.find(b'Content-')  # workaround buggy emails
+                        print("BoundaryFixCont:",q,data[q:q+20],part[:50])
+                        first=False
+                    if not first or len(part)>=300 or not (b'MIME' in part or b'multipart message' in part.lower() or b' mime format' in part.lower()): # skip empty/useless compatibility text!
+                        if first: print("PreBoundaryText:",len(part),part)
+                        pe=parse_eml(data,debug,level+1,p=q,pend=pp)
                         eml["parts"].append(pe)
 #                    else: print("SkipUseless:",len(part),part)
-                while p<len(data) and data[p]<=32: p+=1 # skip whitespace
+                while p<pend and data[p]<=32: p+=1 # skip whitespace
                 q=p
+                first=False
             elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,p,len(data),bo,data[p:p+10])
 
     elif ctyp.startswith('message/'):
         # message/disposition-notification
         # message/rfc822
-        pe=parse_eml(data,level+1,debug)
+        pe=parse_eml(data,debug,level+1,p=hsize,pend=pend)
         eml["parts"].append(pe)
     elif decode:
         # data, decode?
         if ct.get(b'_ce',b'').lower()==b'base64':
-            eml["payload"]=base64.b64decode(data)
-            print("B64-Decoded %d bytes"%(len(data)))
+            eml["payload"]=base64.b64decode(data[hsize:pend])
+#            print("B64-Decoded %d bytes"%(len(data)))
         elif ct.get(b'_ce',b'').lower()==b'quoted-printable':
-            eml["payload"]=quopri.decodestring(data)
-            print("QP-Decoded %d bytes"%(len(data)))
+            eml["payload"]=quopri.decodestring(data[hsize:pend])
+#            print("QP-Decoded %d bytes"%(len(data)))
         else:
-            eml["payload"]=data
+            if not ctyp and len(data[hsize:pend].strip())<3:
+                  eml["payload"]=data[p:pend] # no headers, no body...
+            else: eml["payload"]=data[hsize:pend]
 
 #    if b'_ce' in ct: print("Encoding:",ct[b'_ce'])
 #   4562 Encoding: b'7bit'
@@ -933,25 +938,23 @@ if __name__ == "__main__":
 #    t=open(sys.argv[1],"rb").read()
 #    t=open("ALL.html","rb").read()
     
-    t=open("disposition1.eml","rb").read()
+    t=open("bound.eml","rb").read()
 #    eml=parse_eml_ref(t,debug=False)
     
     def walk(eml,level=0):
 #        if eml["ctyp"].startswith("multipart/") or eml["ctyp"].startswith("message/"):
 #            print(level,eml["ctyp"])
 #        else:
-        print(level,len(eml["raw"]),eml["ctyp"])
+        print(level,eml["size"],eml["ctyp"])
         for e in eml["parts"]: walk(e,level+1)
-        if eml["ctyp"]=="text/plain": print(eml["raw"])
+#        if eml["ctyp"]=="text/plain": print(eml["raw"])
 
     eml=parse_eml(t,debug=True)
     walk(eml)
-    open("___1.raw","wb").write(eml["raw"])
 
     print("--- reference: ---")
     eml=parse_eml_ref(t,debug=False)
     walk(eml)
-    open("___2.raw","wb").write(eml["raw"])
     
 #    print(decode_payload(t,ctyp="text/html",charset=None))
 #    decode_payload(t,ctyp="text/html",charset=None)
