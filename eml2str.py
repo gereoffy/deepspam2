@@ -595,11 +595,18 @@ def decode_payload(data,ctyp="text/html",charset=None):
     elif ctyp=="application/ms-tnef":
 #        print("###### Parse TNEF ######")
         tnefobj = TNEF(data)
+#        print(tnefobj)
+#        print(tnefobj.__dict__)
+#        print(tnefobj.codepage)
+#        print(tnefobj.htmlbody)
         if tnefobj.htmlbody:
+#            charset=tnefobj.codepage or "utf-8"
             charset="utf-8"
             data=html2text(tnefobj.htmlbody.encode(charset))
+        else:
+            data=b''
 #         elif tnef_support>1 and tnefobj.rtfbody:
-#            s = rtf_to_text(tnefobj.rtfbody.decode(tnefcp,"ignore"))
+#            data=rtf_to_text(tnefobj.rtfbody.decode(tnefcp,"ignore"))
     elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata or b'</br>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
 #        origdata=str(charset).encode()+b'\n'+data
 #        data5=html2text5(data)        # html5lib version
@@ -652,7 +659,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     return data
 
 
-def eml2str_new(msg):
+def eml2str(msg):
   msg=parse_eml(msg,decode=True)
   def walk(eml):
     if eml["parts"]:
@@ -664,18 +671,18 @@ def eml2str_new(msg):
     ctyp=p["ctyp"]
     disp=p["disp"]
     charset=p["charset"]
-    fnev="FIXME.dat" #str(p.get_filename())
-    print((ctyp,charset,disp,fnev))
+    fnev=p["name"]
+#    print((ctyp,charset,disp,fnev))
     if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support):
         data=p["payload"]
         data=decode_payload(data,ctyp,charset)
-#        if not text or len(data)>20: text=data
-        if not text or (ctyp=="text/html" and len(data)>20) or len(data)>len(text): text=data
-        if ctyp=="text/html" and len(text)>200: break
+#        if not text or len(data)>20: text=data # a kesobbi szoveg vszinu jobb (html>text, delivery hibak utan csatolva az eredeti level, elol a spamassassin fejlece stb)
+        if not text or (ctyp in ["text/html","application/ms-tnef"] and len(data)>20) or len(data)>len(text)//2 or text.startswith("Spam detection software,"): text=data
+        if ctyp in ["text/html","application/ms-tnef"] and len(text)>200: break
   return text
 
 
-def eml2str(msg):
+def eml2str_old(msg):
   if isinstance(msg, io.IOBase):
     msg = email.message_from_binary_file(msg)
   elif type(msg)==bytes:
@@ -819,18 +826,18 @@ def parse_ctyp(data,hdr=b'_',ct=None):
 #        if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
         if c==ijel: ijel=None  #  idezet vege
         else: value.append(c)  #  idezojelen belul kell minden whitespace is...
-        continue
-      if c==59: #  ;
-        if name: ct[bytes(name)]=bytes(value).rstrip()
+      elif c==59: #  ;
+        if name: ct[bytes(name).lower()]=bytes(value).rstrip()
         name=[]
         value=[]
-      if eqsn:  #  after the = character -> value
+        eqsn=False
+      elif eqsn:  #  after the = character -> value
         if c==34 or c==39: ijel=c   # idezojelek = utan oke
         elif value or c>32: value.append(c)  # skip initial WS
       else:     #  before the = character -> name
         if c==61: eqsn=True #  =
         elif name or c>32: name.append(c)
-    if name: ct[bytes(name)]=bytes(value).rstrip()
+    if name: ct[bytes(name).lower()]=bytes(value).rstrip()
     return ct
 
 
@@ -881,7 +888,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     hsize2=data.find(b'\r\n\r\n',p,pend)+4
     newline=b'\n'
     if hsize2>=4 and hsize2<hsize: hsize,newline=hsize2,b'\r\n'
-#    print("parse_eml:", hsize, len(data), newline, data[:32],data[hsize:hsize+32],data[-32:])
+    if debug: print("parse_eml:", level, p,hsize, pend,  newline, data[p:p+32],data[hsize:hsize+32],data[pend-32:pend])
 #    if level>0 and not data.startswith(b'Content-') and b'Content-' in data: print("BadHeader:",data[:120]) # MIME-Version: es Date: is szokott lenni legelol...
 
     # process headers
@@ -905,16 +912,17 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
         if h[0].lower()==b'content-type': parse_ctyp(h[1],b'_ct',ct)
         if h[0].lower()==b'content-disposition': parse_ctyp(h[1],b'_cd',ct)
         if h[0].lower()==b'content-transfer-encoding': parse_ctyp(h[1],b'_ce',ct)
-    if debug: print(level,hsize,len(data),ct)
+#    if debug: print(level,hsize,len(data),ct)
 
     ctyp=ct.get(b'_ct',b'').decode("us-ascii",errors="ignore").lower()
     cenc=ct.get(b'_ce',b'').decode("us-ascii",errors="ignore").lower()
 #    disp=ct.get(b'_cd',b'').decode("us-ascii",errors="ignore").lower()
     disp=ct[b'_cd'].decode("us-ascii",errors="ignore").lower() if b'_cd' in ct else None
-    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
+#    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
+    cset=ct[b'charset'].decode("us-ascii",errors="ignore").lower() if b'charset' in ct else None
     name=hdrdecode3(ct[b'filename']) if b'filename' in ct else hdrdecode3(ct[b'name']) if b'name' in ct else None
     eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
-    
+
 #    if b'name' in ct: print("FNAME:",hdrdecode3(ct[b'name']))
 #    if b'filename' in ct: print("FNAME:",hdrdecode3(ct[b'filename']))
 
@@ -929,22 +937,30 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
         bo=b'--'+ct[b'boundary']
         q=p=hsize # data=data[hsize:]
         first=True
+        last=False
         while p<pend:
             p=data.find(bo,p,pend)
-            pp=p # pp->start of next boundary
+            _p=p
             if p<0: # process data after the last boundary: (the end-boundary tag is missing too often...)
-                if first: print("BoundaryNotFound:",bo) #, data[:100])
+#                if first: print("BoundaryNotFound:",q,pend,bo) #, data[:100])
+                if not last: print("BoundaryNotFound:",q,pend,bo) #, data[:100])
                 pp=p=pend
-                if data[q:q+8]!=b'Content-': print("PostBoundaryText:",q,p,len(data), data[q:pend])
-            elif pp>0 and data[pp-1]==10:  # backward skip pre-boundary newline...  for compatibility with email lib :(
-                pp-=1
-                if pp>0 and data[pp-1]==13: pp-=1
-            else: print("BoundaryNoNewline:",q,pp,pend,bo)
-            p+=len(bo)
-            if data[p:p+2]==b'--': p+=2 # end boundary
-#            print(q,pp,p,bo,data[p:p+10])
+                if data[q:q+8]!=b'Content-' and data[q:pend].strip(): print("PostBoundaryText:",q,p,len(data), data[q:pend])
+#                print(_p,p,pp)
+            else:
+                pp=p  # pp->start of next boundary
+                p+=len(bo)
+                if pp>0 and data[pp-1]==10:  # backward skip pre-boundary newline...  for compatibility with email lib :(
+                    pp-=1
+                    if pp>0 and data[pp-1]==13: pp-=1
+                else: print("BoundaryNoNewline:",q,pp,pend,bo)
+            #if debug: 
+            if data[p:p+2]==b'--':
+                p+=2 # end boundary
+                last=True
+            if debug: print(level,"Boundary:",_p,first,last,q,pp,p,pend,data[pp:p],data[p:min(p+10,pend)])
             #  (p->end of next boundary)
-            if p>=len(data) or data[p]<=32 or data[p:p+8]==b'Content-': # boundary string at EOF or followed by newline/whitespace or Content-*
+            if p>=pend or data[p]<=32 or data[p:p+8]==b'Content-': # boundary string at EOF or followed by newline/whitespace or Content-*
                 # found!
                 part=data[q:pp]
                 if part and len(part.strip())>2: # not empty block
@@ -957,10 +973,11 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
                         pe=parse_eml(data,debug,decode,level+1,p=q,pend=pp)
                         eml["parts"].append(pe)
 #                    else: print("SkipUseless:",len(part),part)
-                while p<pend and data[p]<=32: p+=1 # skip whitespace
+                while p<pend and data[p]<=32 and data[p]!=10: p+=1 # skip whitespace
+                if p<pend and data[p]==10: p+=1 # skip newline
                 q=p
                 first=False
-            elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,p,len(data),bo,data[p:p+10])
+            elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,pp,p,data[pp:p],data[p:p+10])
 
     elif ctyp.startswith('message/'):
         # message/disposition-notification
@@ -970,7 +987,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     elif decode:
         # data, decode?
         eml["payload"]=decode_body(data[hsize:pend], cenc)
-        if not ctyp and len(eml["payload"].strip())<3: eml["payload"]=data[p:pend] # no headers, no body...
+#        if not ctyp and len(eml["payload"].strip())<3: eml["payload"]=data[p:pend] # no headers, no body...
 
     return eml
 
@@ -1004,25 +1021,27 @@ if __name__ == "__main__":
 #    t=open(sys.argv[1],"rb").read()
 #    t=open("ALL.html","rb").read()
     
-    t=open("disposition2.eml","rb").read()
-#    print(eml2str(t))
-#    print(eml2str_new(t))
+    t=open("tnefhtml.eml","rb").read()
+    print(eml2str(t))
+    print(eml2str_old(t))
+    
 #    eml=parse_eml_ref(t,debug=False)
 
     def walk(eml):
+        yield eml
         if eml["parts"]:
             for p in eml["parts"]: yield from walk(p)
-        else: yield eml
+#        else: yield eml
 
-    eml=parse_eml(t,debug=False,decode=False)
+    eml=parse_eml(t,debug=False,decode=True)
 #    print(eml)
 #    eml=parse_eml(t,debug=True,decode=True)
-    for e in walk(eml): print(e["size"],len(e.get("payload",b'')),e["ctyp"],e["disp"],e["name"])
+    for e in walk(eml): print(e["raw"], e["size"],len(e.get("payload",b'')),e["ctyp"],e["disp"],e["name"])
 
 
-#    print("--- reference: ---")
-#    eml=parse_eml_ref(t,debug=False,decode=True)
-#    for e in walk(eml): print(e["size"],len(e.get("payload",b'')),e["ctyp"])
+    print("--- reference: ---")
+    eml=parse_eml_ref(t,debug=False,decode=True)
+    for e in walk(eml): print(e["size"],len(e.get("payload",b'')),e["ctyp"])
     
 #    print(decode_payload(t,ctyp="text/html",charset=None))
 #    decode_payload(t,ctyp="text/html",charset=None)
