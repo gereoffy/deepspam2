@@ -3,8 +3,10 @@ import io
 import codecs
 import re
 import zipfile
+
 import email
 import email.policy
+from email.header import decode_header#,make_header
 
 from binascii import a2b_qp,a2b_base64
 import base64
@@ -650,6 +652,29 @@ def decode_payload(data,ctyp="text/html",charset=None):
     return data
 
 
+def eml2str_new(msg):
+  msg=parse_eml(msg,decode=True)
+  def walk(eml):
+    if eml["parts"]:
+        for p in eml["parts"]: yield from walk(p)
+    else: yield eml
+
+  text=""
+  for p in walk(msg):
+    ctyp=p["ctyp"]
+    disp=p["disp"]
+    charset=p["charset"]
+    fnev="FIXME.dat" #str(p.get_filename())
+    print((ctyp,charset,disp,fnev))
+    if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support):
+        data=p["payload"]
+        data=decode_payload(data,ctyp,charset)
+#        if not text or len(data)>20: text=data
+        if not text or (ctyp=="text/html" and len(data)>20) or len(data)>len(text): text=data
+        if ctyp=="text/html" and len(text)>200: break
+  return text
+
+
 def eml2str(msg):
   if isinstance(msg, io.IOBase):
     msg = email.message_from_binary_file(msg)
@@ -663,7 +688,7 @@ def eml2str(msg):
     ctyp=p.get_content_type().lower()
     fnev=str(p.get_filename())
     disp=p.get_content_disposition()
-#    print((ctyp,charset,disp,fnev))
+    print((ctyp,charset,disp,fnev))
     if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support):
 #      try:
         data=p.get_payload(decode=True)
@@ -756,26 +781,56 @@ def vocab_split(preview):
     return tok
 
 
+def hdrdecode3(h):     # python 3.x
+#    h=h.decode("raw-unicode-escape")
+    h=h.decode("utf-8",errors="backslashreplace")
+    s=""
+    for b,c in decode_header(h):
+        if isinstance(b, str): # not encoded
+            s+=b
+            continue
+        try:
+            s+=b.decode(c or "raw-unicode-escape",errors="backslashreplace")
+        except:
+            s+=b.decode("latin1",errors="ignore") # fallback
+#    if s!=h: print("DecHdr3:",s,h)
+    return s
+
+
 # parses "Content-*: value; option2=value2" type headers to dict
 def parse_ctyp(data,hdr=b'_',ct=None):
     if ct==None: ct={}
-#    print(ct,hdr,data)
-#  try:
-    for c in data.split(b';'):
-        c=c.strip()
-        if not c: continue
-#        print(c,ct)
-        c=c.split(b'=',1) if hdr in ct else [hdr,c]
-        if len(c)!=2:
-            print("BadCTParameter:",c,data)
-            continue # FIXME
-        v=c[1].strip()
-        if v and v[0] in [34,39]: v=v[1:v.find(v[:1],1)] # idezojelek levagasa
-        ct[c[0].strip().lower()]=v
-#    except Exception as e:
-#      print(data[:100])
-#      print(ct)
-#      print("parse_ctyp EXC:",repr(e))
+#    print(hdr,data)
+
+    p=data.find(b';')
+    if p<0: p=len(data)
+    ct[hdr]=data[:p].strip().split(b' ')[0]
+
+    # parse parameters:
+    q=p+1
+    ijel=None
+    eqsn=False
+    name=[]
+    value=[]
+    while q<len(data):
+      c=data[q]
+      q+=1
+      if ijel:  #  quoted string-en belul vagyunk?
+#        if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
+        if c==ijel: ijel=None  #  idezet vege
+        else: value.append(c)  #  idezojelen belul kell minden whitespace is...
+        continue
+      if c==59: #  ;
+        if name: ct[bytes(name)]=bytes(value).rstrip()
+        name=[]
+        value=[]
+      if eqsn:  #  after the = character -> value
+        if c==34 or c==39: ijel=c   # idezojelek = utan oke
+        elif value or c>32: value.append(c)  # skip initial WS
+      else:     #  before the = character -> name
+        if c==61: eqsn=True #  =
+        elif name or c>32: name.append(c)
+    if name: ct[bytes(name)]=bytes(value).rstrip()
     return ct
 
 
@@ -806,14 +861,14 @@ def parse_eml_ref(data,debug=False,decode=False,level=0):
 #      2 Encoding: b'hexa'   ???  base64-nek nez ki pedig.
 #    376 Encoding: b'utf-8'  WTF?  ez nincs enkodolva
 
-def decode_payload(data,encoding):
+def decode_body(data,encoding):
     try:
         if encoding=='base64': return a2b_base64(data)
         if encoding=='quoted-printable': return a2b_qp(data)
     except Exception as e:
         print("PayloadDecodingExc:",repr(e))
 #    if not encoding in ['7bit','8bit','binary','utf-8']: print("UnknownEncoding:",encoding)
-    if not encoding in ['7bit','8bit','utf-8']: print("UnknownEncoding:",encoding)
+    if encoding and not encoding in ['7bit','8bit','utf-8']: print("UnknownEncoding:",encoding)
     return data
 
 
@@ -854,7 +909,14 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
 
     ctyp=ct.get(b'_ct',b'').decode("us-ascii",errors="ignore").lower()
     cenc=ct.get(b'_ce',b'').decode("us-ascii",errors="ignore").lower()
-    eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "encoding":cenc, "parts":[]} # , "raw":data
+#    disp=ct.get(b'_cd',b'').decode("us-ascii",errors="ignore").lower()
+    disp=ct[b'_cd'].decode("us-ascii",errors="ignore").lower() if b'_cd' in ct else None
+    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
+    name=hdrdecode3(ct[b'filename']) if b'filename' in ct else hdrdecode3(ct[b'name']) if b'name' in ct else None
+    eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
+    
+#    if b'name' in ct: print("FNAME:",hdrdecode3(ct[b'name']))
+#    if b'filename' in ct: print("FNAME:",hdrdecode3(ct[b'filename']))
 
 #  27140 MULTI: b'multipart/alternative'
 #   1388 MULTI: b'multipart/mixed'
@@ -907,7 +969,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
         eml["parts"].append(pe)
     elif decode:
         # data, decode?
-        eml["payload"]=decode_payload(data[hsize:pend], cenc)
+        eml["payload"]=decode_body(data[hsize:pend], cenc)
         if not ctyp and len(eml["payload"].strip())<3: eml["payload"]=data[p:pend] # no headers, no body...
 
     return eml
@@ -943,22 +1005,24 @@ if __name__ == "__main__":
 #    t=open("ALL.html","rb").read()
     
     t=open("disposition2.eml","rb").read()
+#    print(eml2str(t))
+#    print(eml2str_new(t))
 #    eml=parse_eml_ref(t,debug=False)
-    
-    def walk(eml,level=0):
-#        if eml["ctyp"].startswith("multipart/") or eml["ctyp"].startswith("message/"):
-#            print(level,eml["ctyp"])
-#        else:
-        print(level,eml["size"],len(eml.get("payload",b'')),eml["ctyp"])
-        for e in eml["parts"]: walk(e,level+1)
-#        if eml["ctyp"]=="text/plain": print(eml["raw"])
 
-    eml=parse_eml(t,debug=True,decode=True)
-    walk(eml)
+    def walk(eml):
+        if eml["parts"]:
+            for p in eml["parts"]: yield from walk(p)
+        else: yield eml
 
-    print("--- reference: ---")
-    eml=parse_eml_ref(t,debug=False,decode=True)
-    walk(eml)
+    eml=parse_eml(t,debug=False,decode=False)
+#    print(eml)
+#    eml=parse_eml(t,debug=True,decode=True)
+    for e in walk(eml): print(e["size"],len(e.get("payload",b'')),e["ctyp"],e["disp"],e["name"])
+
+
+#    print("--- reference: ---")
+#    eml=parse_eml_ref(t,debug=False,decode=True)
+#    for e in walk(eml): print(e["size"],len(e.get("payload",b'')),e["ctyp"])
     
 #    print(decode_payload(t,ctyp="text/html",charset=None))
 #    decode_payload(t,ctyp="text/html",charset=None)
