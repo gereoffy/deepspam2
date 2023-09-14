@@ -16,8 +16,8 @@ PyTorch implementation of various text classifier methods optimized for email SP
 
 # Libraries included:
 
+- eml2str.py: my mime email parser and html2txt converter functions
+- hdrdecode.py: my email header parser functions, from the pymavis/spamwall project
+- ttykeymap.py: python version of my old getch2.c, console i/o functions and text UI
+- widechars.py: wide unicode utilities, based on https://github.com/jquast/wcwidth
 - striprtf.py: rtf to txt converter, from https://github.com/joshy/striprtf
-- eml2str.py: email parser and html to txt converter by me
-- hdrdecode.py: email header parsers by me, from pymavis/spamwall project
-- widechars.py: wide unicode utilities, tables from https://github.com/jquast/wcwidth
-- ttykeymap.py: python version of my old getch2.c, console i/o functions, text UI
