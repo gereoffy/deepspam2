@@ -1,11 +1,18 @@
 # deepspam2
 DeepSpam milter v2 development
 
-PyTorch implementation of various text classifier methods optimized for email SPAM filtering:
+Project status:
 
-- Done:  CNN + SentencePiece cased (using embedding from pretrained XLM)
-- TODO:  CNN + Word2vec uncased (DeepSpam v1 compatible)
-- TODO:  Transformer variations (BERT, GPT2, LLaMA etc)
+1. deepspam1 ported to pytorch
+2. new model using SentencePiece and embedding from pretrained XLM
+3. new metrics for model eval, optimized for spam filtering
+4. dataset found to be wrong, needs a full review and cleanup
+5. old mailer3 unable to handle dataset properly (utf8, bad html etc)
+6. mailer3 ported to python3 -> mailer4 initial version (same ui/keys)
+7. old html2txt used in deepspam1 found to be wrong... new html parser developed!
+8. wide unicode display issues -> wcwidth/widechars added/implemented...
+9. python's mime email parser found to be sloooow and sometimes broken -> implemented my own
+10. mailer4 missing search & tagging & export functions, TODO...
 
 # Tools included:
 
