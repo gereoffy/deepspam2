@@ -1,16 +1,16 @@
 # deepspam2
 DeepSpam milter v2 development
 
-Project status:
+Project history:
 
-1. deepspam1 ported to pytorch
+1. deepspam1 tf2-keras model ported to pytorch
 2. new model using SentencePiece and embedding from pretrained XLM
 3. new metrics for model eval, optimized for spam filtering
-4. dataset found to be wrong, needs a full review and cleanup
+4. dataset found to be wrong, requires a full review and cleanup :(
 5. old mailer3 unable to handle dataset properly (utf8, bad html etc)
 6. mailer3 ported to python3 -> mailer4 initial version (same ui/keys)
-7. old html2txt used in deepspam1 found to be wrong... new html parser developed!
-8. wide unicode display issues -> wcwidth/widechars added/implemented...
+7. wide unicode display issues -> wcwidth/widechars added/implemented...
+8. old html2txt used in deepspam1 found to be wrong... new html parser developed!
 9. python's mime email parser found to be sloooow and sometimes broken -> implemented my own
 10. mailer4 missing search & tagging & export functions, TODO...
 
