@@ -37,6 +37,11 @@ keymap={
     b'\x1b\t': "a+tab",
     b'\x1b\n': "a+enter",
 
+    b'\x1b[A': "up",
+    b'\x1b[B': "down",
+    b'\x1b[C': "right",
+    b'\x1b[D': "left",
+
     b'\x1bOA': "up",
     b'\x1bOB': "down",
     b'\x1bOC': "right",
@@ -77,6 +82,11 @@ keymap={
     b'\x1b\x1b[6~': "a+pgdn",
     b'\x1b[1;9H': "a+home",
     b'\x1b[1;9F': "a+end",
+    
+    b'\x1bOP': "f1",
+    b'\x1bOQ': "f2",
+    b'\x1bOR': "f3",
+    b'\x1bOS': "f4",
     
     b'\x1b[11~': "f1",
     b'\x1b[12~': "f2",
