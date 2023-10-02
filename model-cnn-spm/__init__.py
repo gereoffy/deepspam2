@@ -30,6 +30,9 @@ class DeepSpam:
 # ds=DeepSpam()   # load model
 # result=ds(text) # use model
 
+  MIN_BLOCK=8
+  MAX_BLOCK=256
+
   def __init__(self,path="model/",device="cpu",load="deepspam.pt"):
     self.device=device
 
@@ -66,19 +69,45 @@ class DeepSpam:
         data.append(d)
     return data
 
+  def tokenized(self,texts):
+    return [" ".join(d) for d in self.tokenizer.encode_as_pieces(texts)]
 
-  def __call__(self,text,max_len=None):
+  def __call__(self,text,max_len=MAX_BLOCK,min_len=MIN_BLOCK):
     with torch.no_grad():
-        input_ids=torch.tensor(self.tokenize([text],max_len),dtype=torch.int,device=self.device)
+        tokens=self.tokenize([text],max_len)
+        if len(tokens[0])<min_len: return -1 # too short
+#        return len(tokens[0])
+        input_ids=torch.tensor(tokens,dtype=torch.int,device=self.device)
         logits=self.model(self.embedding(input_ids))
         res=logits[0].sigmoid() # get probs
         res=res[0]*100.0/(res[0]+res[1])
     return res.item() # 0.0 ... 100.0 %
 
+  def evalbatch(self,texts,max_len=MAX_BLOCK,min_len=MIN_BLOCK):
+    with torch.no_grad():
+        tokens=self.tokenize(texts,max_len)
+        input_ids=torch.tensor(tokens,dtype=torch.int,device=self.device)
+        logits=self.model(self.embedding(input_ids))
+#        print(logits[0:10])
+
+        probs=logits.sigmoid() # get probs
+#        print(probs[0:10])
+        return [ -1 if tok[min_len-1]==0 else (res[0]*100.0/(res[0]+res[1])).item() for tok,res in zip(tokens,probs) ]
+#        return [ (res[0]*100.0/(res[0]+res[1])).item() for res in probs ]
+#        return [ (res[0].item()*100.0) for res in probs ]
+
+#        probs=logits.softmax(dim=1)
+#        print(probs[0:10])
+#        return [res[0].item()*100.0 for res in probs]
+
+#        res=logits[0].sigmoid() # get probs
+#        res=res[0]*100.0/(res[0]+res[1])
+#    return res.item() # 0.0 ... 100.0 %
+
   def save(self,path="model/"):
     torch.save(self.model.state_dict(), path+'deepspam.pt')
 
-  def train(self,texts,label_ids,num_train,epochs=50,batch_size=256,max_len=256,dropwords=10,savebest=True):
+  def train(self,texts,label_ids,num_train,epochs=50,batch_size=256,max_len=MAX_BLOCK,dropwords=10,savebest=True):
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
     data=self.tokenize(texts,max_len)
@@ -173,7 +202,7 @@ class DeepSpam:
 
                 logits=self.model(self.embedding(x))
                 val_loss+=loss_fn(logits,y).item()*eval_batch_size
-                probs=logits.softmax(dim=1)
+                probs=logits.softmax(dim=1)  # FIXME: use sigmoid!
 
                 _, acc_pred = probs.max(dim=1)
                 _, acc_good = y.max(dim=1)
