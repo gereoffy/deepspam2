@@ -12,6 +12,13 @@ from eml2str import eml2str,get_mimedata,vocab_split
 from widechars import wcfixstr,ucsremove
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
+try:
+  from model import DeepSpam
+  ds=DeepSpam(device="cuda")   # load model
+except:
+  ds=None
+
+
 #sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'xmlcharrefreplace')
 sys.stdout.reconfigure(encoding='utf-8',errors="xmlcharrefreplace") # FIXes: UnicodeEncodeError: 'utf-8' codec can't encode characters in position 354-355: surrogates not allowed
 sys.stdin = sys.stdin.detach()
@@ -19,7 +26,7 @@ sys.stdin = sys.stdin.detach()
 term_w,term_h=os.get_terminal_size(0)
 print(term_w,term_h,sys.stdin.isatty())
 term_pl=term_w*6 # preview len, kb 1000 karakter itermben
-term_w-=4
+term_w-=2
 term_h-=2
 term_w1=term_w//2-12
 term_w2=term_w//2
@@ -27,6 +34,7 @@ term_w2=term_w//2
 mails_meta=[]
 mails_flag=bytearray()
 mails_text=[]
+mails_deep=[]
 
 def do_eml(eml,endpos):
     eml["_size"]=endpos-eml["_fpos"]
@@ -88,7 +96,6 @@ def readfolder(f):
   print(fpos,eml)
 
 
-
 def get_preview(yy):
     # preview?
     preview=mails_text[yy]
@@ -99,7 +106,25 @@ def get_preview(yy):
         preview=" ".join(preview.split()) # fix whitespace
 #        preview=preview[:term_pl] # truncate to ~1000 chars
         mails_text[yy]=preview
+        if ds: mails_deep[yy]=ds(preview) # use deepspam model
     return preview
+
+def get_deep(yy):
+    if not ds: return "n/a",""
+    d=mails_deep[yy]
+    if not d: return "",""
+    if d<0: return "short",""
+    # !!!
+    if d>=99.9: color=196
+    elif d>=99: color=202
+    elif d>=98: color=208
+    elif d>=90: color=214
+    elif d>=80: color=226
+    elif d>=20: color=100 #fixme
+    elif d>=10: color=154
+    elif d>=2: color=118
+    else: color=46
+    return "%5.2f%%"%(d),"\x1b[30m\x1b[48;5;%dm"%(color)
 
 
 ####################################################################################################
@@ -136,39 +161,20 @@ mails_flag+=bytearray(num_mails-len(mails_flag))
 # PREVIEW?
 try:
     mails_text=open(fnev+".text","rt",encoding="utf-8",errors="ignore").read().split("\n")
+    if ds:    # DEEPSPAM?
+        print("Calculating deepspam values...")
+        yy=0
+        while yy<len(mails_text):
+            mails_deep+=ds.evalbatch(mails_text[yy:yy+256]) # Batch eval
+            yy+=256
+            print(yy,end="\r")
 except:
     pass
+
 mails_text+=[None]*(num_mails-len(mails_text))
-
-
-if 0:
-#outf1=open("SMALL.mbox","wb")
-#outf=open("SLOW.mbox","wb")
-  import email
-  import gc
-  gc.disable()
-  #gc.enable()
-
-  #num_mails=10000
-  for y in range(num_mails):
-    print("\r[%d]  %d  "%(y,time.time()-t0),end="")
-#    if (y%100)==0: gc.collect()
-#    get_preview(y)
-    yy=y+22000
-    mboxf.seek(mails_meta[yy]["_fpos"])
-    eml=mboxf.read(mails_meta[yy]["_size"])
-#    if len(eml)<4096:  outf1.write(eml)
-#    if len(eml)>1024000: outf2.write(eml)
-    t1=time.time()
-    msg = email.message_from_bytes(eml, policy=email.policy.default)
-    t1=time.time()-t1
-    if t1>0.1:
-        print("%8.3f"%(t1*1000.0))
-#        outf.write(eml)
+if ds: mails_deep+=[None]*(num_mails-len(mails_deep))
 
 print("LOADED %d emails in %5.3f seconds"%(num_mails,time.time()-t0))
-
-#exit(0)
 
 vocab={}
 try:
@@ -235,7 +241,9 @@ def drawline(pos,sel=False):
 #    fr=str(fr) if mode_from>1 else fr[mode_from]
     s=m["_size"]-m["_hsize"]
     fl=mails_flag[pos]
+    dp,dc=get_deep(pos)
 #    print("%s%s%s%s %*s%8d%s %*s%s"%(
+    if ds: print("\x1b[0m"+dc+"%*s\x1b[0m"%(7,dp),end="")
     print("%s%s%s%s %*s\x1b[%dG%8d%s %*s%s"%(
         '\x1b[7m' if sel else '\x1b[0m',
         '\x1b[1m' if (fl & MAILFLAG_SELECTED) else '',
@@ -249,6 +257,7 @@ def drawline(pos,sel=False):
 #    if(yy==y){ set_color(7); g_y=i+2; } else set_color(0);
 #      if(M_FLAGS(y)&MAILFLAG_SELECTED) set_color(1);
 
+
 def drawall():
     global xx,yy,y0,last_yy,last_y0,last_xx
     if yy<m_step(-1,1): yy=m_step(-1,1)
@@ -257,16 +266,18 @@ def drawall():
     if yy>=m_step(y0,term_h): y0=m_step(yy,-(term_h-1))
     if y0<m_step(-1,1): y0=m_step(-1,1)
 
+    if mode_preview: preview=get_preview(yy) # prepare for proper DS results!
+
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
-    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d \x1b[0m%s"%(
+    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s \x1b[0m%s"%(
         'E' if filter_extra else 'e',
         'A' if filter_attach else 'a',
         'D' if filter_deleted else 'd',
         '+' if filter_deleted==1 else '',
         'S' if filter_selected<2 else 's',
         '' if filter_selected else '+',
-        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],eol))
+        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],eol))
 
     # list of emails
     y=y0
@@ -284,10 +295,13 @@ def drawall():
     # preview
     if mode_preview:
         print('\x1b[0m\x1b[%d;%df'%(term_h+2,1), '═'*term_w) # reset color, goto, hline
-        if len(vocab)<100:
-            print(wcfixstr(get_preview(yy))[:term_pl],'\x1b[0J') # erase to end of screen
+        if ds:
+            preview=ds.tokenized([preview])[0]
+            print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
+        elif len(vocab)<100:
+            print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
         else:
-            line=wcfixstr(get_preview(yy))[:term_pl]
+            line=wcfixstr(preview)[:term_pl]
             for t in vocab_split(line):
                 sys.stdout.write('\x1b[1m' if t.lower() in vocab else '\x1b[0m') # color
                 sys.stdout.write(t)
