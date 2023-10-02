@@ -871,11 +871,12 @@ def parse_eml_ref(data,debug=False,decode=False,level=0):
 def decode_body(data,encoding):
     try:
         if encoding=='base64': return a2b_base64(data)
-        if encoding=='quoted-printable': return a2b_qp(data)
+#        if encoding=='quoted-printable': return a2b_qp(data)
+        if encoding in ['quoted-printable','utf8','utf-8']: return a2b_qp(data)
     except Exception as e:
         print("PayloadDecodingExc:",repr(e))
 #    if not encoding in ['7bit','8bit','binary','utf-8']: print("UnknownEncoding:",encoding)
-    if encoding and not encoding in ['7bit','8bit','utf-8']: print("UnknownEncoding:",encoding)
+    if encoding and not encoding in ['7bit','8bit']: print("UnknownEncoding:",encoding)
     return data
 
 
