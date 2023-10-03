@@ -107,7 +107,7 @@ class DeepSpam:
   def save(self,path="model/"):
     torch.save(self.model.state_dict(), path+'deepspam.pt')
 
-  def train(self,texts,label_ids,num_train,epochs=50,batch_size=256,max_len=MAX_BLOCK,dropwords=10,savebest=True):
+  def train(self,texts,label_ids,num_train,epochs=25,batch_size=256,max_len=MAX_BLOCK,dropwords=10,savebest=True):
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
     data=self.tokenize(texts,max_len)
@@ -202,7 +202,8 @@ class DeepSpam:
 
                 logits=self.model(self.embedding(x))
                 val_loss+=loss_fn(logits,y).item()*eval_batch_size
-                probs=logits.softmax(dim=1)  # FIXME: use sigmoid!
+#                probs=logits.softmax(dim=1)  # FIXME: use sigmoid!
+                probs=logits.sigmoid()
 
                 _, acc_pred = probs.max(dim=1)
                 _, acc_good = y.max(dim=1)
@@ -210,12 +211,14 @@ class DeepSpam:
                 val_acc+=acc.item()
 
                 for res in probs:
+                    res0=res[0]/(res[0]+res[1]) # normalize sigmoid result
+                    res1=res[1]/(res[0]+res[1])
                     if label_ids[i]==0: test_spamcnt+=1 # 0=negative (spam)
                     else: test_hamcnt+=1                # 1=positive (ham)
-                    if res[1]>0.9: # ham detected
+                    if res1>0.9: # ham detected
                         if label_ids[i]==1: test_ham+=1
                         else: test_fn+=1
-                    elif res[0]>0.9: # spam detected
+                    elif res0>0.9: # spam detected
                         if label_ids[i]==0: test_spam+=1
                         else: test_fp+=1
                     i+=1
