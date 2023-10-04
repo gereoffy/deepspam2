@@ -12,11 +12,7 @@ from eml2str import eml2str,get_mimedata,vocab_split
 from widechars import wcfixstr,ucsremove
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
-try:
-  from model import DeepSpam
-  ds=DeepSpam(device="cuda")   # load model
-except:
-  ds=None
+ds=None
 
 
 #sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'xmlcharrefreplace')
@@ -24,7 +20,7 @@ sys.stdout.reconfigure(encoding='utf-8',errors="xmlcharrefreplace") # FIXes: Uni
 sys.stdin = sys.stdin.detach()
 sys.stdin = sys.stdin.detach()
 term_w,term_h=os.get_terminal_size(0)
-print(term_w,term_h,sys.stdin.isatty())
+#print(term_w,term_h,sys.stdin.isatty())
 term_pl=term_w*6 # preview len, kb 1000 karakter itermben
 term_w-=2
 term_h-=2
@@ -35,6 +31,7 @@ mails_meta=[]
 mails_flag=bytearray()
 mails_text=[]
 mails_deep=[]
+mails_dedup={}
 
 def do_eml(eml,endpos):
     eml["_size"]=endpos-eml["_fpos"]
@@ -107,6 +104,17 @@ def get_preview(yy):
 #        preview=preview[:term_pl] # truncate to ~1000 chars
         mails_text[yy]=preview
         if ds: mails_deep[yy]=ds(preview) # use deepspam model
+
+    if preview:
+        try:
+            if yy<mails_dedup[preview]:
+                mails_flag[mails_dedup[preview]]|=2 # set DUP flag
+                mails_dedup[preview]=yy
+            elif yy>mails_dedup[preview]:
+                mails_flag[yy]|=2 # set DUP flag
+        except:
+            mails_dedup[preview]=yy # never seen diz
+
     return preview
 
 def get_deep(yy):
@@ -135,6 +143,7 @@ t0=time.time()
 
 fnev="test.mbox" if len(sys.argv)<2 else sys.argv[1]
 mboxf=open(fnev,"rb")
+if not mboxf.readline().startswith(b"From "): exit(0)
 
 # META?
 try:
@@ -143,7 +152,8 @@ try:
     lm=mails_meta[-1]
     mboxf.seek(lm["_fpos"]+lm["_size"])
 except:
-    pass
+    mboxf.seek(0)
+
 num_mails=len(mails_meta)
 readfolder(mboxf)
 if len(mails_meta)>num_mails:
@@ -157,6 +167,14 @@ try:
 except:
     pass
 mails_flag+=bytearray(num_mails-len(mails_flag))
+
+# DEEPSPAM?
+try:
+    sys.path.append("/home/mailer4")
+    from model import DeepSpam
+    ds=DeepSpam(path="/home/mailer4/model/",device="cuda")   # load model
+except:
+    pass
 
 # PREVIEW?
 try:
@@ -190,6 +208,7 @@ except:
 eol="\x1b[0K" # Note: Erasing the line won't move the cursor, meaning that the cursor will stay at the last position
 
 MAILFLAG_SELECTED=1
+MAILFLAG_DUP=2
 MAILFLAG_READ=4
 MAILFLAG_NEW=8
 #MAILFLAG_ATTACH=16
@@ -198,6 +217,7 @@ MAILFLAG_EXTRA=64
 MAILFLAG_LIST=128
 
 filter_attach=0
+filter_duplicate=1
 filter_deleted=0
 filter_selected=0
 filter_extra=0
@@ -221,6 +241,7 @@ def m_step(old,dist):
         if old<0 or old>=num_mails: break
         fl=mails_flag[old]
         if filter_deleted==0 and (fl&MAILFLAG_DEL): continue
+        if filter_duplicate and (fl&MAILFLAG_DUP): continue
         if filter_deleted==2 and not (fl&MAILFLAG_DEL): continue
         if filter_selected==2 and (fl&MAILFLAG_SELECTED): continue
         if filter_selected==1 and not (fl&MAILFLAG_SELECTED): continue
@@ -244,10 +265,11 @@ def drawline(pos,sel=False):
     dp,dc=get_deep(pos)
 #    print("%s%s%s%s %*s%8d%s %*s%s"%(
     if ds: print("\x1b[0m"+dc+"%*s\x1b[0m"%(7,dp),end="")
-    print("%s%s%s%s %*s\x1b[%dG%8d%s %*s%s"%(
+    print("%s%s%s%s%s %*s\x1b[%dG%8d%s %*s%s"%(
         '\x1b[7m' if sel else '\x1b[0m',
+        '\x1b[2m' if (fl & MAILFLAG_DUP) else '',
         '\x1b[1m' if (fl & MAILFLAG_SELECTED) else '',
-        'D' if fl & MAILFLAG_DEL else ' ',
+        'D' if fl & (MAILFLAG_DEL) else ' ',
         '*' if fl & MAILFLAG_EXTRA else ' ',
         -term_w1, wcfixstr(fr)[xx:xx+term_w1],           # "from" shifted/trimmed
         term_w1, s, '+' if "_attach" in m else ' ',      # bodysize, attachment flag
@@ -266,18 +288,21 @@ def drawall():
     if yy>=m_step(y0,term_h): y0=m_step(yy,-(term_h-1))
     if y0<m_step(-1,1): y0=m_step(-1,1)
 
-    if mode_preview: preview=get_preview(yy) # prepare for proper DS results!
+    dedup=-1
+    if mode_preview:
+        preview=get_preview(yy) # prepare for proper DS results!
+        if preview and preview in mails_dedup: dedup=mails_dedup[preview]
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
-    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s \x1b[0m%s"%(
+    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s 1st:%d \x1b[0m%s"%(
         'E' if filter_extra else 'e',
         'A' if filter_attach else 'a',
         'D' if filter_deleted else 'd',
         '+' if filter_deleted==1 else '',
         'S' if filter_selected<2 else 's',
         '' if filter_selected else '+',
-        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],eol))
+        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],dedup,eol))
 
     # list of emails
     y=y0
@@ -295,7 +320,7 @@ def drawall():
     # preview
     if mode_preview:
         print('\x1b[0m\x1b[%d;%df'%(term_h+2,1), '═'*term_w) # reset color, goto, hline
-        if ds:
+        if ds and 0:
             preview=ds.tokenized([preview])[0]
             print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
         elif len(vocab)<100:
@@ -374,7 +399,7 @@ while True:
         for y in range(num_mails):
             if (y%100)==0: box_message(["generating previews","","%10d/%d"%(y,num_mails)])
             get_preview(y)
-        open(fnev+".text","wt",encoding="utf-8",errors="ignore").write("\n".join(mails_text))
+        if len(mails_text)>=2000: open(fnev+".text","wt",encoding="utf-8",errors="ignore").write("\n".join(mails_text))
 
     if ch=='enter':
         mboxf.seek(mails_meta[yy]["_fpos"])
