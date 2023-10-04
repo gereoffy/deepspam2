@@ -378,9 +378,9 @@ while True:
     if ch=="left" and xx>0: xx-=5
     if ch=="right": xx+=5
     if ch=="f": mode_from=(mode_from+1)%3
-    if ch=='d': filter_deleted=(filter_deleted+1)%3
+    if ch=='D': filter_deleted=(filter_deleted+1)%3
     if ch=='?': filter_selected=(filter_selected+1)%3
-    if ch=='a': filter_attach^=1
+    if ch=='A': filter_attach^=1
     if ch=='E': filter_extra^=1
 
     if ch=='l':
@@ -401,6 +401,31 @@ while True:
             get_preview(y)
         if len(mails_text)>=2000: open(fnev+".text","wt",encoding="utf-8",errors="ignore").write("\n".join(mails_text))
 
+    if ch in ['d','t','[']:
+        i=-1
+        tagged=[]
+        while True:
+            i=m_step(i,1)
+            if i>=num_mails: break
+            tagged.append(i)
+        if len(tagged)<=0: continue # nothing selected
+        if ch=='d':
+            box_message(["Delete %d emails? (Y/n)"%(len(tagged))])
+            if getch2()=='Y':
+                for i in tagged: mails_flag[i]|=MAILFLAG_DEL
+        if ch=='t':
+            tags=["SPAM","PHIS","HAM"]
+            sel=box_message(["Tag %d emails?"%(len(tagged))]+tags,y=1)
+            if sel>0:
+                with open(fnev+".tag_"+tags[sel-1],"wt",encoding="utf-8",errors="ignore") as f:
+                    for i in tagged: f.write("%s:%d:%s\n"%(fnev,i,mails_text[i]))
+        if ch=='[':
+            sel=box_input(t1="Filename to export %d emails?"%(len(tagged)))
+            with open(sel,"wb") as f:
+                for i in tagged:
+                    mboxf.seek(mails_meta[i]["_fpos"])
+                    f.write(mboxf.read(mails_meta[i]["_size"]))
+
     if ch=='enter':
         mboxf.seek(mails_meta[yy]["_fpos"])
         mimeinfo,mimedata=get_mimedata(mboxf.read(mails_meta[yy]["_size"]))
@@ -408,6 +433,7 @@ while True:
         if sel<0: continue
         open("/tmp/mailer4.tmp","wb").write(mimedata[sel])
         break
+
   except:
 #   print("\n!!!!!! EXC:", traceback.format_exc(), "!!!!!!" )
    sel=box_message(traceback.format_exc().splitlines(),y=0)
