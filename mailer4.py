@@ -31,7 +31,7 @@ mails_meta=[]
 mails_flag=bytearray()
 mails_text=[]
 mails_deep=[]
-mails_dedup={}
+mails_dedup=[]
 
 def do_eml(eml,endpos):
     eml["_size"]=endpos-eml["_fpos"]
@@ -104,17 +104,6 @@ def get_preview(yy):
 #        preview=preview[:term_pl] # truncate to ~1000 chars
         mails_text[yy]=preview
         if ds: mails_deep[yy]=ds(preview) # use deepspam model
-
-    if preview:
-        try:
-            if yy<mails_dedup[preview]:
-                mails_flag[mails_dedup[preview]]|=2 # set DUP flag
-                mails_dedup[preview]=yy
-            elif yy>mails_dedup[preview]:
-                mails_flag[yy]|=2 # set DUP flag
-        except:
-            mails_dedup[preview]=yy # never seen diz
-
     return preview
 
 def get_deep(yy):
@@ -291,15 +280,16 @@ def drawall():
     dedup=-1
     if mode_preview:
         preview=get_preview(yy) # prepare for proper DS results!
-        if preview and preview in mails_dedup: dedup=mails_dedup[preview]
+#        if preview and preview in mails_dedup: dedup=mails_dedup[preview]
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
-    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s 1st:%d \x1b[0m%s"%(
+    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s 1st:%d \x1b[0m%s"%(
         'E' if filter_extra else 'e',
         'A' if filter_attach else 'a',
         'D' if filter_deleted else 'd',
         '+' if filter_deleted==1 else '',
+        'H' if filter_duplicate else 'h',
         'S' if filter_selected<2 else 's',
         '' if filter_selected else '+',
         yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],dedup,eol))
@@ -382,6 +372,7 @@ while True:
     if ch=='?': filter_selected=(filter_selected+1)%3
     if ch=='A': filter_attach^=1
     if ch=='E': filter_extra^=1
+    if ch=='H': filter_duplicate^=1
 
     if ch=='l':
         ret=box_input(0,0,"Goto line:","")
@@ -425,6 +416,25 @@ while True:
                 for i in tagged:
                     mboxf.seek(mails_meta[i]["_fpos"])
                     f.write(mboxf.read(mails_meta[i]["_size"]))
+
+
+    if ch=='h': #  Hide duplicates?
+        sel=box_message(["Hide duplicates?","Exact match","Vocab words only","First 100 words","Words 10-100"],y=1)
+        if sel<1: continue
+        hash_dupes={}
+        for i in range(num_mails):
+            preview=get_preview(i)
+            if sel==2: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
+            if sel==3: preview=" ".join(preview.split()[:100])
+            if sel==4: preview=" ".join(preview.split()[10:100])
+            if not preview: continue # no data...
+            if preview in hash_dupes:
+                mails_flag[i]|=MAILFLAG_DUP
+            else:
+                hash_dupes[preview]=i
+                mails_flag[i]&=~MAILFLAG_DUP
+        del hash_dupes
+
 
     if ch=='enter':
         mboxf.seek(mails_meta[yy]["_fpos"])
