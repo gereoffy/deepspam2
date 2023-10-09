@@ -6,6 +6,7 @@ import sys
 import time
 import pickle
 import traceback
+import difflib
 
 from hdrdecode import parse_from,hdrdecode3,decodeline
 from eml2str import eml2str,get_mimedata,vocab_split,remove_url
@@ -181,6 +182,8 @@ except:
 mails_text+=[None]*(num_mails-len(mails_text))
 if ds: mails_deep+=[None]*(num_mails-len(mails_deep))
 
+mails_dedup=[-1]*num_mails
+
 print("LOADED %d emails in %5.3f seconds"%(num_mails,time.time()-t0))
 
 vocab={}
@@ -230,7 +233,8 @@ def m_step(old,dist):
         if old<0 or old>=num_mails: break
         fl=mails_flag[old]
         if filter_deleted==0 and (fl&MAILFLAG_DEL): continue
-        if filter_duplicate and (fl&MAILFLAG_DUP): continue
+#        if filter_duplicate and (fl&MAILFLAG_DUP): continue
+        if filter_duplicate and (mails_dedup[old]>=0): continue
         if filter_deleted==2 and not (fl&MAILFLAG_DEL): continue
         if filter_selected==2 and (fl&MAILFLAG_SELECTED): continue
         if filter_selected==1 and not (fl&MAILFLAG_SELECTED): continue
@@ -300,7 +304,7 @@ def drawline(pos,sel=False):
     if ds: print("\x1b[0m"+dc+"%*s\x1b[0m"%(7,dp),end="")
     print("%s%s%s%s%s %*s\x1b[%dG%8d%s %*s%s"%(
         '\x1b[7m' if sel else '\x1b[0m',
-        '\x1b[2m' if (fl & MAILFLAG_DUP) else '',
+        '\x1b[2m' if mails_dedup[pos]>=0 else '',
         '\x1b[1m' if (fl & MAILFLAG_SELECTED) else '',
         'D' if fl & (MAILFLAG_DEL) else ' ',
         '*' if fl & MAILFLAG_EXTRA else ' ',
@@ -321,14 +325,23 @@ def drawall():
     if yy>=m_step(y0,term_h): y0=m_step(yy,-(term_h-1))
     if y0<m_step(-1,1): y0=m_step(-1,1)
 
-    dedup=-1
     if mode_preview:
         preview=get_preview(yy) # prepare for proper DS results!
-#        if preview and preview in mails_dedup: dedup=mails_dedup[preview]
+
+    dupc=dupo=mails_dedup[yy] # duplication count & original
+    if dupc<0: # base mail
+        dupc=-dupc
+        dupo=yy
+        dups=None
+    else:      # duplicate mail
+        dupc=-mails_dedup[dupc] # find base
+        dupa=vocab_split(get_preview(dupo))
+        dupb=vocab_split(get_preview(yy))
+        dups=difflib.SequenceMatcher(None, dupa, dupb)
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
-    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s 1st:%d  preview:%s \x1b[0m%s"%(
+    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s  dup:%d%s%s  preview:%s \x1b[0m%s"%(
         'E' if filter_extra else 'e',
         'A' if filter_attach else 'a',
         'D' if filter_deleted else 'd',
@@ -336,8 +349,9 @@ def drawall():
         'H' if filter_duplicate else 'h',
         'S' if filter_selected<2 else 's',
         '' if filter_selected else '+',
-        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],dedup,
-        ["off","vocab","sanitized","non-latin","tokenizer"][mode_preview], eol))
+        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0], 
+        dupc," (%d)"%dupo if dupo!=yy else "!", " %5.3f"%(dups.ratio()) if dups else "",
+        "diff" if dups else ["off","vocab","sanitized","non-latin","tokenizer"][mode_preview], eol))
 
     # list of emails
     y=y0
@@ -355,7 +369,19 @@ def drawall():
     # preview
     if mode_preview:
         print('\x1b[0m\x1b[%d;%df'%(term_h+2,1), '═'*term_w) # reset color, goto, hline
-        if ds and mode_preview==4:
+        if dups:
+            # show color mail diff!
+            lasta=lastb=0
+            l=term_pl
+            for block in dups.get_matching_blocks():
+#                l-= (block[0]-lasta) + (block[1]-lastb) + block[2]
+                d=wcfixstr("".join(dupa[lasta:block[0]])),wcfixstr("".join(dupb[lastb:block[1]])),wcfixstr("".join(dupa[block[0]:block[0]+block[2]])) # - + = sections
+                l-= len(d[0]) + len(d[1]) + len(d[2])
+                if l<0: break # fixme crop str
+                sys.stdout.write("\x1b[0;31m"+d[0]+"\x1b[0;32m"+d[1]+"\x1b[0;37m"+d[2])
+                lasta,lastb=block[0]+block[2],block[1]+block[2]
+            sys.stdout.write('\x1b[0J') # clear the rest
+        elif ds and mode_preview==4:
             preview=ds.tokenized([preview])[0]
             print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
         elif mode_preview==3:
@@ -522,9 +548,10 @@ while True:
 
 
     if ch=='h': #  Hide duplicates?
-        sel=box_message(["Hide duplicates?","Exact match","Sanitized match","Vocab words only","Vocab words (5:100)","First 100 words","Words 10:100"],y=1)
+        sel=box_message(["Hide duplicates?","Exact match","Sanitized match","Vocab words only","Vocab words (5:100)","First 100 words","Words 10:100","SequenceMatcher"],y=1)
         if sel<1: continue
         hash_dupes={}
+#        mails_dedup=[-1]*num_mails # kell ez?
         for i in range(num_mails):
             preview=get_preview(i)
             if sel>1: preview=remove_url(preview).lower()
@@ -532,12 +559,34 @@ while True:
             if sel==4: preview=" ".join([t for t in vocab_split(preview) if t in vocab][5:100])
             if sel==5: preview=" ".join(preview.split()[:100])
             if sel==6: preview=" ".join(preview.split()[10:100])
-            if not preview: continue # no data...
-            if preview in hash_dupes:
-                mails_flag[i]|=MAILFLAG_DUP
-            else:
+            if not preview:
+                mails_dedup[i]=-1
+                continue # no data...
+            if sel==7:
+                # diff!
+                if (i%100)==0: box_message(["calculating diffs...","","%10d/%d"%(i,num_mails)])
+                b=vocab_split(preview)
+                j=-1
+                for a in hash_dupes:
+                    dups=difflib.SequenceMatcher(None, vocab_split(a), b)
+                    if dups.quick_ratio()>0.8: # quick-path
+                        if dups.ratio()>0.8:   # this is duplicate!
+                            j=hash_dupes[a]    # base email index
+                            break
+                if j>=0:
+                    mails_dedup[j]-=1
+                    mails_dedup[i]=j
+                else:
+                    hash_dupes[preview]=i
+                    mails_dedup[i]=-1
+                continue
+            try:
+                j=hash_dupes[preview]
+                mails_dedup[j]-=1
+                mails_dedup[i]=j
+            except:
                 hash_dupes[preview]=i
-                mails_flag[i]&=~MAILFLAG_DUP
+                mails_dedup[i]=-1
         del hash_dupes
 
 
