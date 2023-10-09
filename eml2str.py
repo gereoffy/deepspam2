@@ -790,7 +790,8 @@ def vocab_split(preview):
     inw=False
     for c in preview:
 #        if not c.isalpha(): # if c in '\n\t #".,!?;:_-+/*()[]{}0123456789':
-        if not c.isalnum():
+#        if not c.isalnum():
+        if not (c.isalnum() or (s and s[-1].isnumeric() and c in ":-/." )): # handle special case of date/phone numbers...
             if inw:
                 tok.append(s)
                 s=c
