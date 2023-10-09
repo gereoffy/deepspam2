@@ -335,9 +335,10 @@ def drawall():
         dups=None
     else:      # duplicate mail
         dupc=-mails_dedup[dupc] # find base
-        dupa=vocab_split(get_preview(dupo))
-        dupb=vocab_split(get_preview(yy))
-        dups=difflib.SequenceMatcher(None, dupa, dupb)
+        dupa=vocab_split(remove_url(get_preview(dupo)))
+        dupb=vocab_split(remove_url(get_preview(yy)))
+#        if dupa!=dupb: dups=difflib.SequenceMatcher(None, dupa, dupb)
+        if dupa!=dupb: dups=difflib.SequenceMatcher(None, [t.lower() for t in dupa], [t.lower() for t in dupb]) # case insensitive match!
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
@@ -351,7 +352,7 @@ def drawall():
         '' if filter_selected else '+',
         yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0], 
         dupc," (%d)"%dupo if dupo!=yy else "!", " %5.3f"%(dups.ratio()) if dups else "",
-        "diff" if dups else ["off","vocab","sanitized","non-latin","tokenizer"][mode_preview], eol))
+        ["off","vocab","diff" if dups else "sanitized","non-latin","tokenizer"][mode_preview], eol))
 
     # list of emails
     y=y0
@@ -369,16 +370,20 @@ def drawall():
     # preview
     if mode_preview:
         print('\x1b[0m\x1b[%d;%df'%(term_h+2,1), '═'*term_w) # reset color, goto, hline
-        if dups:
+        if dups and mode_preview==2:
             # show color mail diff!
             lasta=lastb=0
             l=term_pl
             for block in dups.get_matching_blocks():
-#                l-= (block[0]-lasta) + (block[1]-lastb) + block[2]
-                d=wcfixstr("".join(dupa[lasta:block[0]])),wcfixstr("".join(dupb[lastb:block[1]])),wcfixstr("".join(dupa[block[0]:block[0]+block[2]])) # - + = sections
-                l-= len(d[0]) + len(d[1]) + len(d[2])
-                if l<0: break # fixme crop str
-                sys.stdout.write("\x1b[0;31m"+d[0]+"\x1b[0;32m"+d[1]+"\x1b[0;37m"+d[2])
+                if l<=0: break # fixme crop str
+                d0,d1,d2=wcfixstr("".join(dupa[lasta:block[0]])),wcfixstr("".join(dupb[lastb:block[1]])),wcfixstr("".join(dupb[block[0]:block[0]+block[2]])) # - + = sections
+                d0=d0[:l]
+                l-=len(d0)
+                d1=d1[:l]
+                l-=len(d1)
+                d2=d2[:l]
+                l-=len(d2)
+                sys.stdout.write("\x1b[0;31m"+d0+"\x1b[0;32m"+d1+"\x1b[0;37m"+d2)
                 lasta,lastb=block[0]+block[2],block[1]+block[2]
             sys.stdout.write('\x1b[0J') # clear the rest
         elif ds and mode_preview==4:
@@ -401,6 +406,7 @@ def drawall():
             line=wcfixstr(preview)[:term_pl]
             for t in vocab_split(line):
                 sys.stdout.write('\x1b[1m' if t.lower() in vocab else '\x1b[0m') # color
+#                sys.stdout.write('|'+t) # to debug vocab_split
                 sys.stdout.write(t)
             sys.stdout.write('\x1b[0J') # clear the rest
 
@@ -553,6 +559,7 @@ while True:
         hash_dupes={}
 #        mails_dedup=[-1]*num_mails # kell ez?
         for i in range(num_mails):
+            if (i%(100 if sel==7 else 1000))==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes))])
             preview=get_preview(i)
             if sel>1: preview=remove_url(preview).lower()
             if sel==3: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
@@ -562,29 +569,26 @@ while True:
             if not preview:
                 mails_dedup[i]=-1
                 continue # no data...
-            if sel==7:
-                # diff!
-                if (i%100)==0: box_message(["calculating diffs...","","%10d/%d"%(i,num_mails)])
-                b=vocab_split(preview)
-                j=-1
-                for a in hash_dupes:
-                    dups=difflib.SequenceMatcher(None, vocab_split(a), b)
-                    if dups.quick_ratio()>0.8: # quick-path
-                        if dups.ratio()>0.8:   # this is duplicate!
-                            j=hash_dupes[a]    # base email index
-                            break
-                if j>=0:
-                    mails_dedup[j]-=1
-                    mails_dedup[i]=j
-                else:
-                    hash_dupes[preview]=i
-                    mails_dedup[i]=-1
-                continue
             try:
                 j=hash_dupes[preview]
                 mails_dedup[j]-=1
                 mails_dedup[i]=j
             except:
+                if sel==7:
+                    # calc diff!
+                    j=-1
+                    b=vocab_split(preview)
+                    for a in hash_dupes:
+                        dups=difflib.SequenceMatcher(None, vocab_split(a), b)
+                        if dups.quick_ratio()>=0.95: # quick-path
+                            if dups.ratio()>=0.95:   # this is duplicate!
+                                j=hash_dupes[a]      # base email index
+                                break
+                    if j>=0: # found a match!
+                        mails_dedup[j]-=1
+                        mails_dedup[i]=j
+                        continue
+                # no match, this is a new uniqe mail!
                 hash_dupes[preview]=i
                 mails_dedup[i]=-1
         del hash_dupes
