@@ -12,7 +12,8 @@ Project history:
 7. wide unicode display issues -> wcwidth/widechars added/implemented...
 8. old html2txt used in deepspam1 found to be wrong... new html parser developed!
 9. python's mime email parser found to be sloooow and sometimes broken -> implemented my own
-10. mailer4 missing search & tagging & export functions, TODO...
+10. mailer4: integrated deepspam model evaluation, see Screenshot-mailer4-diffmode.png
+11. mailer4: added search, selection, deduplication, tagging features - tested on real data
 
 # Tools included:
 
