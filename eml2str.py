@@ -765,12 +765,32 @@ def get_mimedata(eml):
     return mimeinfo,mimedata
 
 
+#TAG_RE1 = re.compile(r'<[^>]+>')
+#TAG_RE2 = re.compile(r'\[[^[]+\]')
+TAG_RE3 = re.compile(r'https? ?: ?//[-._a-zA-Z0-9/?&=#]*')
+TAG_RE4 = re.compile(r'[-+$_.a-z0-9=]*@[-.a-z0-9]*\.[a-z][a-z][a-z]*')
+TAG_RE5 = re.compile(r'[1-9][-.,:/0-9 ]+[0-9]')
+TAG_RE6 = re.compile(r'[a-zA-Z][a-zA-Z][-.0-9a-zA-Z]*\.hu')
+
+#TAG_RE6 = re.compile(r'[-0-9a-z][-0-9a-z][-0-9a-z]*\.[-0-9a-z][-0-9a-z][-0-9a-z]*\.[-0-9a-z][-0-9a-z][-0-9a-z]?')
+#TAG_email=re.compile(r'([A-Za-z0-9]+[.-_])*[A-Za-z0-9]+@[A-Za-z0-9-]+(\.[A-Z|a-z]{2,})+')
+
+def remove_url(text):
+    text=TAG_RE3.sub('<URL>', text)
+    text=TAG_RE4.sub('<EMAIL>', text)
+    text=TAG_RE6.sub('<DOMAIN>', text)
+#    text=TAG_RE5.sub('<NUMBER>', text)
+    return text
+
+
 def vocab_split(preview):
+#    preview=remove_url(preview)
     tok=[]
     s=""
     inw=False
     for c in preview:
-        if not c.isalpha(): # if c in '\n\t #".,!?;:_-+/*()[]{}0123456789':
+#        if not c.isalpha(): # if c in '\n\t #".,!?;:_-+/*()[]{}0123456789':
+        if not c.isalnum():
             if inw:
                 tok.append(s)
                 s=c
@@ -786,6 +806,8 @@ def vocab_split(preview):
         inw=True
     tok.append(s)
     return tok
+
+
 
 
 def hdrdecode3(h):     # python 3.x

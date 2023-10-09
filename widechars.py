@@ -222,6 +222,10 @@ def wcfixstr(s):
 #    return "".join([wcfixchar(c) if ord(c)>=0x1100 else c for c in s])
 #    return "".join([chr(0x200B)*_bisearch(ord(c),WIDE_EASTASIAN)+c if ord(c)>=0x1100 else c for c in s])
 
+# https://stackoverflow.com/questions/1366068/whats-the-complete-range-for-chinese-characters-in-unicode
+def is_cjk(c):
+    return 0x4E00<=ord(c)<=0x9FFF
+
 
 if __name__ == "__main__":
 

@@ -8,8 +8,8 @@ import pickle
 import traceback
 
 from hdrdecode import parse_from,hdrdecode3,decodeline
-from eml2str import eml2str,get_mimedata,vocab_split
-from widechars import wcfixstr,ucsremove
+from eml2str import eml2str,get_mimedata,vocab_split,remove_url
+from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
 ds=None
@@ -220,7 +220,7 @@ xx=0
 last_yy=-1
 last_y0=-1
 last_xx=-1
-
+search=""
 
 def m_step(old,dist):
     d=-1 if dist<0 else 1
@@ -239,6 +239,50 @@ def m_step(old,dist):
         if filter_attach and not "_attach" in mails_meta[old]: continue
         dist-=1
     return old
+
+def check_match(y):
+    if not search: return True
+    if ":" in search:
+        m,v=search.split(":",1)
+        if m==m.upper(): v=v.lower()
+        ########## string match ############
+        # Subject:
+        if 's' in m:
+            if v in mails_meta[y]["subject"]: return True
+        if 'S' in m:
+            if v in mails_meta[y]["subject"].lower(): return True
+        # From:
+        if 'f' in m or 'F' in m:
+            fr=mails_meta[y]["from"]
+            fr=fr[1]+"  <"+fr[0]+">" if mode_from>1 else fr[mode_from]
+            if m=='F': fr=fr.lower()
+            if v in fr: return True
+        # Preview:
+        if 'p' in m:
+            if v in get_preview(y): return True
+        if 'P' in m:
+            if v in get_preview(y).lower(): return True
+        # Headers:
+        if 'h' in m:
+            mboxf.seek(mails_meta[y]["_fpos"])
+            if v in mboxf.read(mails_meta[y]["_hsize"]).decode("utf-8",errors="ignore"): return True
+    else:
+        m,d,v=search[0],search[1],int(search[2:])
+        # numeric match
+        if   m=='d': x=mails_deep[y] # deepspam value
+        elif m=='s': x=mails_meta[y]["_size"]-mails_meta[y]["_hsize"] # body size
+        elif m=='w': x=len(get_preview(y).split()) # number of words
+        elif m=='v': x=len([t for t in vocab_split(get_preview(y)) if t.lower() in vocab]) # number of vocab words
+        elif m=='l': x=len([t for t in get_preview(y) if t.isalpha() and ord(t)<=0x17F]) # number of latin chars
+        elif m=='L': x=len([t for t in get_preview(y) if ord(t)>0x17F]) # number of non-latin chars
+        elif m=='j': x=len([t for t in get_preview(y) if is_cjk(t)]) # number of CJK chars
+        if d=='<' and x<v: return True
+#        if d=='<=' and x<=v: return True
+        if d=='=' and x==v: return True
+#        if d=='=>' and x=>v: return True
+        if d=='>' and x>v: return True
+    return False
+
 
 def drawline(pos,sel=False):
     if pos<0 or pos>=num_mails:
@@ -284,7 +328,7 @@ def drawall():
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
-    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s 1st:%d \x1b[0m%s"%(
+    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s 1st:%d  preview:%s \x1b[0m%s"%(
         'E' if filter_extra else 'e',
         'A' if filter_attach else 'a',
         'D' if filter_deleted else 'd',
@@ -292,7 +336,8 @@ def drawall():
         'H' if filter_duplicate else 'h',
         'S' if filter_selected<2 else 's',
         '' if filter_selected else '+',
-        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],dedup,eol))
+        yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0],dedup,
+        ["off","vocab","sanitized","non-latin","tokenizer"][mode_preview], eol))
 
     # list of emails
     y=y0
@@ -310,12 +355,23 @@ def drawall():
     # preview
     if mode_preview:
         print('\x1b[0m\x1b[%d;%df'%(term_h+2,1), '═'*term_w) # reset color, goto, hline
-        if ds and 0:
+        if ds and mode_preview==4:
             preview=ds.tokenized([preview])[0]
             print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
+        elif mode_preview==3:
+            l=0
+            for t in preview:
+#                sys.stdout.write('\x1b[0m' if 32<=ord(t)<128 or t.lower() in "áéíóöőúüű" else '\x1b[1m') # color
+                sys.stdout.write('\x1b[0m' if ord(t)<=0x17F else '\x1b[1m') # color
+                t=wcfixstr(t)
+                l+=len(t)
+                if l>=term_pl: break
+                sys.stdout.write(t)
+            sys.stdout.write('\x1b[0J') # clear the rest
         elif len(vocab)<100:
             print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
         else:
+            if mode_preview==2: preview=remove_url(preview)
             line=wcfixstr(preview)[:term_pl]
             for t in vocab_split(line):
                 sys.stdout.write('\x1b[1m' if t.lower() in vocab else '\x1b[0m') # color
@@ -381,16 +437,63 @@ while True:
         except:
             pass
 
+
     # preview mode/generation:
     if ch=='p':
-        term_h+=8 if mode_preview else -8
-        mode_preview^=1
+#        term_h+=8 if mode_preview else -8
+        mode_preview=(mode_preview+1)%(5 if ds else 4)
+        if mode_preview==0: term_h+=8   # disable
+        elif mode_preview==1: term_h-=8 # enable
 #        if not mode_preview: y0=m_step(y0,-8)
     if ch=='P': # generate previews
         for y in range(num_mails):
             if (y%100)==0: box_message(["generating previews","","%10d/%d"%(y,num_mails)])
             get_preview(y)
         if len(mails_text)>=2000: open(fnev+".text","wt",encoding="utf-8",errors="ignore").write("\n".join(mails_text))
+
+
+    # Search!
+    if ch in ['s','n']: # new search
+        search=box_input(0,0,"Search for:","")
+        ch=ch.upper()
+    if ch=='S': # search prev
+        i=yy
+        while True:
+            i=m_step(i,-1)
+            if i<0: break
+            if check_match(i):
+                yy=i
+                break
+    if ch=='N': # search next
+        i=yy
+        while True:
+            i=m_step(i,1)
+            if i>=num_mails: break
+            if check_match(i):
+                yy=i
+                break
+
+    # (de)select!
+    if ch in ['+','-','*']:
+        i=-1
+        if filter_selected==1 and ch=='*': # special case! 'S' mode + * => unselect all & go to 'S+' mode
+            while True:
+                i=m_step(i,1)
+                if i>=num_mails: break
+                mails_flag[i]&=~MAILFLAG_SELECTED
+            filter_selected=0;
+            continue
+        search=box_input(0,0,"Select by:","")
+        while True:
+            i=m_step(i,1)
+            if i>=num_mails: break
+            ret=MAILFLAG_SELECTED if check_match(i) else 0
+            if ch=='-': mails_flag[i]&=~ret
+            elif ch=='*': mails_flag[i]^=ret
+            else:
+                if filter_selected==1: mails_flag[i]&=(~MAILFLAG_SELECTED) | ret
+                else: mails_flag[i]|=ret
+
 
     if ch in ['d','t','[']:
         i=-1
@@ -419,14 +522,16 @@ while True:
 
 
     if ch=='h': #  Hide duplicates?
-        sel=box_message(["Hide duplicates?","Exact match","Vocab words only","First 100 words","Words 10-100"],y=1)
+        sel=box_message(["Hide duplicates?","Exact match","Sanitized match","Vocab words only","Vocab words (5:100)","First 100 words","Words 10:100"],y=1)
         if sel<1: continue
         hash_dupes={}
         for i in range(num_mails):
             preview=get_preview(i)
-            if sel==2: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
-            if sel==3: preview=" ".join(preview.split()[:100])
-            if sel==4: preview=" ".join(preview.split()[10:100])
+            if sel>1: preview=remove_url(preview).lower()
+            if sel==3: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
+            if sel==4: preview=" ".join([t for t in vocab_split(preview) if t in vocab][5:100])
+            if sel==5: preview=" ".join(preview.split()[:100])
+            if sel==6: preview=" ".join(preview.split()[10:100])
             if not preview: continue # no data...
             if preview in hash_dupes:
                 mails_flag[i]|=MAILFLAG_DUP
