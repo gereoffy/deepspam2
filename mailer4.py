@@ -577,9 +577,10 @@ while True:
                 if sel==7:
                     # calc diff!
                     j=-1
-                    b=vocab_split(preview)
+                    dups=difflib.SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
+                    dups.set_seq2(vocab_split(preview))   # use set_seq2() to set the commonly used sequence once...
                     for a in hash_dupes:
-                        dups=difflib.SequenceMatcher(None, vocab_split(a), b)
+                        dups.set_seq1(vocab_split(a))     # ...and call set_seq1() repeatedly, once for each of the other sequences.
                         if dups.quick_ratio()>=0.95: # quick-path
                             if dups.ratio()>=0.95:   # this is duplicate!
                                 j=hash_dupes[a]      # base email index
