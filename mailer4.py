@@ -1,4 +1,4 @@
-#! /usr/bin/python3
+#! /usr/bin/python3.11
 
 import time
 import os
@@ -6,7 +6,9 @@ import sys
 import time
 import pickle
 import traceback
-import difflib
+
+from difflib import SequenceMatcher
+#from cdifflib import CSequenceMatcher as SequenceMatcher
 
 from hdrdecode import parse_from,hdrdecode3,decodeline
 from eml2str import eml2str,get_mimedata,vocab_split,remove_url
@@ -158,6 +160,13 @@ except:
     pass
 mails_flag+=bytearray(num_mails-len(mails_flag))
 
+# DeDUPS?
+try:
+    mails_dedup=pickle.load(open(fnev+".dedup","rb"))
+except:
+    pass
+mails_dedup+=[-1]*(num_mails-len(mails_dedup))
+
 # DEEPSPAM?
 try:
     sys.path.append("/home/mailer4")
@@ -181,8 +190,6 @@ except:
 
 mails_text+=[None]*(num_mails-len(mails_text))
 if ds: mails_deep+=[None]*(num_mails-len(mails_deep))
-
-mails_dedup=[-1]*num_mails
 
 print("LOADED %d emails in %5.3f seconds"%(num_mails,time.time()-t0))
 
@@ -328,17 +335,17 @@ def drawall():
     if mode_preview:
         preview=get_preview(yy) # prepare for proper DS results!
 
+    dups=None
     dupc=dupo=mails_dedup[yy] # duplication count & original
     if dupc<0: # base mail
         dupc=-dupc
         dupo=yy
-        dups=None
     else:      # duplicate mail
         dupc=-mails_dedup[dupc] # find base
         dupa=vocab_split(remove_url(get_preview(dupo)))
         dupb=vocab_split(remove_url(get_preview(yy)))
-#        if dupa!=dupb: dups=difflib.SequenceMatcher(None, dupa, dupb)
-        if dupa!=dupb: dups=difflib.SequenceMatcher(None, [t.lower() for t in dupa], [t.lower() for t in dupb]) # case insensitive match!
+#        if dupa!=dupb: dups=SequenceMatcher(None, dupa, dupb)
+        if dupa!=dupb: dups=SequenceMatcher(None, [t.lower() for t in dupa], [t.lower() for t in dupb]) # case insensitive match!
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
@@ -558,8 +565,11 @@ while True:
         if sel<1: continue
         hash_dupes={}
 #        mails_dedup=[-1]*num_mails # kell ez?
+        t0=time.time()
+        n_diffs=0
         for i in range(num_mails):
-            if (i%(100 if sel==7 else 1000))==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes))])
+            if (i%(100 if sel==7 else 1000))==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes)),
+                "%5.3f sec / %d ns/diff"%(time.time()-t0,(time.time()-t0)*1000000/n_diffs if n_diffs else 0 ) ])
             preview=get_preview(i)
             if sel>1: preview=remove_url(preview).lower()
             if sel==3: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
@@ -577,10 +587,11 @@ while True:
                 if sel==7:
                     # calc diff!
                     j=-1
-                    dups=difflib.SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
+                    dups=SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
                     dups.set_seq2(vocab_split(preview))   # use set_seq2() to set the commonly used sequence once...
                     for a in hash_dupes:
                         dups.set_seq1(vocab_split(a))     # ...and call set_seq1() repeatedly, once for each of the other sequences.
+                        n_diffs+=1
                         if dups.quick_ratio()>=0.95: # quick-path
                             if dups.ratio()>=0.95:   # this is duplicate!
                                 j=hash_dupes[a]      # base email index
@@ -593,6 +604,7 @@ while True:
                 hash_dupes[preview]=i
                 mails_dedup[i]=-1
         del hash_dupes
+        pickle.dump(mails_dedup, open(fnev+".dedup","wb"))
 
 
     if ch=='enter':
