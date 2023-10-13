@@ -488,7 +488,8 @@ while True:
         for y in range(num_mails):
             if (y%100)==0: box_message(["generating previews","","%10d/%d"%(y,num_mails)])
             get_preview(y)
-        if len(mails_text)>=2000: open(fnev+".text","wt",encoding="utf-8",errors="ignore").write("\n".join(mails_text))
+        if len(mails_text)>=2000:
+            with open(fnev+".text","wt",encoding="utf-8",errors="ignore") as f: f.write("\n".join(mails_text))
 
 
     # Search!
@@ -612,7 +613,7 @@ while True:
         mimeinfo,mimedata=get_mimedata(mboxf.read(mails_meta[yy]["_size"]))
         sel=box_message(mimeinfo,y=0)
         if sel<0: continue
-        open("/tmp/mailer4.tmp","wb").write(mimedata[sel])
+        with open("/tmp/mailer4.tmp","wb") as f: f.write(mimedata[sel])
         break
 
   except:
@@ -622,7 +623,7 @@ while True:
 
  clrscr()
  if sum(x!=0 for x in mails_flag):
-    pickle.dump(mails_flag, open(fnev+".flag","wb"))
+    with open(fnev+".flag","wb") as f: pickle.dump(mails_flag, f)
  if ch=="q": break # quit
  if ch=="enter":
     # start viewer!
