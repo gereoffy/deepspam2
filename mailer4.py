@@ -553,6 +553,7 @@ while True:
         for i in range(num_mails):
             if (i%(100 if sel==7 else 1000))==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes)),
                 "%5.3f sec / %d ns/diff"%(time.time()-t0,(time.time()-t0)*1000000/n_diffs if n_diffs else 0 ) ])
+            if mails_flag[i] & MAILFLAG_DEL: continue # ignore already deleted emails!
             preview=get_preview(i)
             if sel>1: preview=remove_url(preview).lower()
             if sel==3: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
@@ -570,9 +571,7 @@ while True:
                     dups.set_seq2(vocab_split(preview))   # use set_seq2() to set the commonly used sequence once...
                     for a in hash_dupes:
                         dups.set_seq1(vocab_split(a)); n_diffs+=1     # ...and call set_seq1() repeatedly, once for each of the other sequences.
-                        if dups.quick_ratio()>=0.95:   # quick-path
-                            if dups.ratio()>=0.95:     # this is duplicate!  
-                                j=hash_dupes[a]; break # base email index
+                        if dups.real_quick_ratio()>=0.95 and dups.quick_ratio()>=0.95 and dups.ratio()>=0.95: j=hash_dupes[a]; break # base email index
                     if j>=0: mails_dedup[j]-=1; mails_dedup[i]=j; continue  # found a match!
                 # no match, this is a new uniqe mail!
                 hash_dupes[preview]=i; mails_dedup[i]=-1
