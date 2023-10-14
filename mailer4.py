@@ -230,7 +230,6 @@ xx=0
 last_yy=-1
 last_y0=-1
 last_xx=-1
-search=""
 
 def m_step(old,dist):
     d=-1 if dist<0 else 1
@@ -251,12 +250,33 @@ def m_step(old,dist):
         dist-=1
     return old
 
-def check_match(y):
-    if not search: return True
-    if ":" in search:
-        m,v=search.split(":",1)
+search={"input":"","type":None}
+
+def init_search(s=""):
+    search["input"]=s
+    if not s: search["type"]=None ; return
+    for c in s:
+        if not c.isalpha(): break
+    if c==":": # string search
+        m,v=s.split(":",1)
         if m==m.upper(): v=v.lower()
+        search["src"]=m ; search["value"]=v ; search["type"]=c
+        return
+    if c in "<=>": # numeric compare
+        m,v=s.split(c,1)
+        if v[0] in "<=>": c+=v[0] ; v=v[1:]
+        search["src"]=m ; search["value"]=int(v) ; search["type"]=c
+        return
+    # TODO: exact match, sanitized match, regex match etc...
+    search["src"]="SF" ; search["value"]=s.lower() ; search["type"]=":" # default: case-insensitive search in from & subject
+
+
+def check_match(y):
+    d=search["type"]
+    if not d: return True
+    if d==":":
         ########## string match ############
+        m,v=search["src"],search["value"]
         # Subject:
         if 's' in m:
             if v in mails_meta[y]["subject"]: return True
@@ -278,8 +298,8 @@ def check_match(y):
             mboxf.seek(mails_meta[y]["_fpos"])
             if v in mboxf.read(mails_meta[y]["_hsize"]).decode("utf-8",errors="ignore"): return True
     else:
-        m,d,v=search[0],search[1],int(search[2:])
         # numeric match
+        m,v=search["src"],search["value"]
         if   m=='d': x=mails_deep[y] # deepspam value
         elif m=='s': x=mails_meta[y]["_size"]-mails_meta[y]["_hsize"] # body size
         elif m=='w': x=len(get_preview(y).split()) # number of words
@@ -287,10 +307,13 @@ def check_match(y):
         elif m=='l': x=len([t for t in get_preview(y) if t.isalpha() and ord(t)<=0x17F]) # number of latin chars
         elif m=='L': x=len([t for t in get_preview(y) if ord(t)>0x17F]) # number of non-latin chars
         elif m=='j': x=len([t for t in get_preview(y) if is_cjk(t)]) # number of CJK chars
+        elif m=="h": # number of duplicates
+            x=mails_dedup[y]
+            if x>=0: x=-mails_dedup[x] # find base index
         if d=='<' and x<v: return True
-#        if d=='<=' and x<=v: return True
+        if d=='<=' and x<=v: return True
         if d=='=' and x==v: return True
-#        if d=='=>' and x=>v: return True
+        if d=='>=' and x>=v: return True
         if d=='>' and x>v: return True
     return False
 
@@ -494,7 +517,7 @@ while True:
 
     # Search!
     if ch in ['s','n']: # new search
-        search=box_input(0,0,"Search for:","")
+        init_search(box_input(0,0,"Search for:",search["input"]))
         ch=ch.upper()
     if ch=='S': # search prev
         i=yy
@@ -511,7 +534,7 @@ while True:
         if filter_selected==1 and ch=='*': # special case! 'S' mode + * => unselect all & go to 'S+' mode
             while (i:=m_step(i,1))<num_mails: mails_flag[i]&=~MAILFLAG_SELECTED
             filter_selected=0; continue
-        search=box_input(0,0,"Select by:","")
+        init_search(box_input(0,0,"Select by:",search["input"]))
         while (i:=m_step(i,1))<num_mails:
             ret=MAILFLAG_SELECTED if check_match(i) else 0
             if ch=='-': mails_flag[i]&=~ret
