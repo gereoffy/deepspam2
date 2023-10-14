@@ -16,7 +16,7 @@ from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
 ds=None
-
+geoip=None
 
 #sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'xmlcharrefreplace')
 sys.stdout.reconfigure(encoding='utf-8',errors="xmlcharrefreplace") # FIXes: UnicodeEncodeError: 'utf-8' codec can't encode characters in position 354-355: surrogates not allowed
@@ -66,7 +66,7 @@ def readfolder(f):
             try:
                 hdrname,hdrbody = hdr.split(b':',1)
                 hdrname=hdrname.lower()
-                if hdrname in [b'from',b'subject',b'x-deepspam']: # csak ezek kellenek
+                if hdrname in [b'from',b'subject',b'x-deepspam',b'x-grey-ng']: # csak ezek kellenek
                     eml[hdrname.decode("us-ascii")]=decodeline(hdrbody)
             except:
                 print("INVALID:",hdr,"\n   EXC:", traceback.format_exc() )
@@ -126,6 +126,20 @@ def get_deep(yy):
     else: color=46
     return "%5.2f%%"%(d),"\x1b[30m\x1b[48;5;%dm"%(color)
 
+def get_grey(yy):
+    try:    grey=mails_meta[yy]["x-grey-ng"]
+    except: return "???"
+    s=grey.split()[0]
+    if (p:=grey.find("ip="))>=0:
+        ip=grey[p+3:].split(")")[0]
+        if geoip and (g:=geoip.lookup(ip)):
+            # g = (('NL', 'EU', 'Netherlands'), 211252, 'Delis LLC', 8, 24)
+            cc,co,cn=g[0]
+            if cn=="United States of America": cn="U.S.A."
+#            s="%s/%s (%s)"%(co,cn,g[2][:20])
+            s="%s/%s/%s"%(co,cn,g[2])
+        else: s=ip
+    return s
 
 ####################################################################################################
 ###########                                   M A I N                                    ###########
@@ -172,6 +186,13 @@ try:
     sys.path.append("/home/mailer4")
     from model import DeepSpam
     ds=DeepSpam(path="/home/mailer4/model/",device="cuda")   # load model
+except:
+    pass
+
+# GEOIP:
+try:
+    from pylibloc import LocDB
+    geoip=LocDB()
 except:
     pass
 
@@ -293,6 +314,11 @@ def check_match(y):
             if v in get_preview(y): return True
         if 'P' in m:
             if v in get_preview(y).lower(): return True
+        # grey/geoip:
+        if 'g' in m:
+            if v in get_grey(y): return True
+        if 'G' in m:
+            if v in get_grey(y).lower(): return True
         # Headers:
         if 'h' in m:
             mboxf.seek(mails_meta[y]["_fpos"])
@@ -372,7 +398,7 @@ def drawall():
 
     # header:  [eadS+L+] 90749/90749 [172x37]  P:2108154475 S:6723  [2phWI]
     sys.stdout.write('\x1b[H')  # goto 0,0
-    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s  dup:%d%s%s  preview:%s \x1b[0m%s"%(
+    print("\x1b[0m\x1b[1m  [%s%s%s%s%s%s%s] %d/%d [%dx%d]  P:%d S:%d D:%s  dup:%d%s%s  preview:%s  %s \x1b[0m%s"%(
         'E' if filter_extra else 'e',
         'A' if filter_attach else 'a',
         'D' if filter_deleted else 'd',
@@ -382,7 +408,7 @@ def drawall():
         '' if filter_selected else '+',
         yy,num_mails,term_w,term_h,mails_meta[yy]["_fpos"],mails_meta[yy]["_size"],get_deep(yy)[0], 
         dupc," (%d)"%dupo if dupo!=yy else "!", " %5.3f"%(dups.ratio()) if dups else "",
-        ["off","vocab","diff" if dups else "sanitized","non-latin","tokenizer"][mode_preview], eol))
+        ["off","vocab","diff" if dups else "sanitized","non-latin","tokenizer"][mode_preview], get_grey(yy), eol)[:term_w])
 
     # list of emails
     y=y0
