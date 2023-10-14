@@ -498,35 +498,21 @@ while True:
         ch=ch.upper()
     if ch=='S': # search prev
         i=yy
-        while True:
-            i=m_step(i,-1)
-            if i<0: break
-            if check_match(i):
-                yy=i
-                break
+        while (i:=m_step(i,-1))>=0:
+            if check_match(i): yy=i; break
     if ch=='N': # search next
         i=yy
-        while True:
-            i=m_step(i,1)
-            if i>=num_mails: break
-            if check_match(i):
-                yy=i
-                break
+        while (i:=m_step(i,1))<num_mails:
+            if check_match(i): yy=i; break
 
     # (de)select!
     if ch in ['+','-','*']:
         i=-1
         if filter_selected==1 and ch=='*': # special case! 'S' mode + * => unselect all & go to 'S+' mode
-            while True:
-                i=m_step(i,1)
-                if i>=num_mails: break
-                mails_flag[i]&=~MAILFLAG_SELECTED
-            filter_selected=0;
-            continue
+            while (i:=m_step(i,1))<num_mails: mails_flag[i]&=~MAILFLAG_SELECTED
+            filter_selected=0; continue
         search=box_input(0,0,"Select by:","")
-        while True:
-            i=m_step(i,1)
-            if i>=num_mails: break
+        while (i:=m_step(i,1))<num_mails:
             ret=MAILFLAG_SELECTED if check_match(i) else 0
             if ch=='-': mails_flag[i]&=~ret
             elif ch=='*': mails_flag[i]^=ret
@@ -536,12 +522,9 @@ while True:
 
 
     if ch in ['d','t','[']:
-        i=-1
         tagged=[]
-        while True:
-            i=m_step(i,1)
-            if i>=num_mails: break
-            tagged.append(i)
+        i=-1
+        while (i:=m_step(i,1))<num_mails: tagged.append(i)
         if len(tagged)<=0: continue # nothing selected
         if ch=='d':
             box_message(["Delete %d emails? (Y/n)"%(len(tagged))])
@@ -566,8 +549,7 @@ while True:
         if sel<1: continue
         hash_dupes={}
 #        mails_dedup=[-1]*num_mails # kell ez?
-        t0=time.time()
-        n_diffs=0
+        t0=time.time(); n_diffs=0
         for i in range(num_mails):
             if (i%(100 if sel==7 else 1000))==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes)),
                 "%5.3f sec / %d ns/diff"%(time.time()-t0,(time.time()-t0)*1000000/n_diffs if n_diffs else 0 ) ])
@@ -577,35 +559,25 @@ while True:
             if sel==4: preview=" ".join([t for t in vocab_split(preview) if t in vocab][5:100])
             if sel==5: preview=" ".join(preview.split()[:100])
             if sel==6: preview=" ".join(preview.split()[10:100])
-            if not preview:
-                mails_dedup[i]=-1
-                continue # no data...
+            if not preview: mails_dedup[i]=-1; continue # no data...
             try:
                 j=hash_dupes[preview]
-                mails_dedup[j]-=1
-                mails_dedup[i]=j
+                mails_dedup[j]-=1; mails_dedup[i]=j
             except:
-                if sel==7:
-                    # calc diff!
+                if sel==7: # calc diff!
                     j=-1
                     dups=SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
                     dups.set_seq2(vocab_split(preview))   # use set_seq2() to set the commonly used sequence once...
                     for a in hash_dupes:
-                        dups.set_seq1(vocab_split(a))     # ...and call set_seq1() repeatedly, once for each of the other sequences.
-                        n_diffs+=1
-                        if dups.quick_ratio()>=0.95: # quick-path
-                            if dups.ratio()>=0.95:   # this is duplicate!
-                                j=hash_dupes[a]      # base email index
-                                break
-                    if j>=0: # found a match!
-                        mails_dedup[j]-=1
-                        mails_dedup[i]=j
-                        continue
+                        dups.set_seq1(vocab_split(a)); n_diffs+=1     # ...and call set_seq1() repeatedly, once for each of the other sequences.
+                        if dups.quick_ratio()>=0.95:   # quick-path
+                            if dups.ratio()>=0.95:     # this is duplicate!  
+                                j=hash_dupes[a]; break # base email index
+                    if j>=0: mails_dedup[j]-=1; mails_dedup[i]=j; continue  # found a match!
                 # no match, this is a new uniqe mail!
-                hash_dupes[preview]=i
-                mails_dedup[i]=-1
+                hash_dupes[preview]=i; mails_dedup[i]=-1
         del hash_dupes
-        pickle.dump(mails_dedup, open(fnev+".dedup","wb"))
+        with open(fnev+".dedup","wb") as f: pickle.dump(mails_dedup, f)
 
 
     if ch=='enter':
