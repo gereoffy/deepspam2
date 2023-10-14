@@ -584,7 +584,7 @@ while True:
             sel=box_message(["Tag %d emails?"%(len(tagged))]+tags,y=1)
             if sel>0:
                 with open(fnev+".tag_"+tags[sel-1],"wt",encoding="utf-8",errors="ignore") as f:
-                    for i in tagged: f.write("%s:%d:%s\n"%(fnev,i,mails_text[i]))
+                    for i in tagged: f.write("%s:%d:%s\n"%(fnev,i,get_preview(i)))
         if ch=='[':
             sel=box_input(t1="Filename to export %d emails?"%(len(tagged)))
             with open(sel,"wb") as f:
