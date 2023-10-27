@@ -3,6 +3,7 @@ import os
 import sys
 import syslog
 import codecs
+import traceback
 from email.header import decode_header,make_header
 
 
