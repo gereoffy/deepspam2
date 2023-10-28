@@ -1,4 +1,4 @@
-#! /usr/bin/python3.11
+#! /usr/bin/python3
 
 import time
 import os
@@ -136,6 +136,7 @@ def get_grey(yy):
             # g = (('NL', 'EU', 'Netherlands'), 211252, 'Delis LLC', 8, 24)
             cc,co,cn=g[0]
             if cn=="United States of America": cn="U.S.A."
+            if cn=="United Kingdom of Great Britain and Northern Ireland": cn="U.K."
 #            s="%s/%s (%s)"%(co,cn,g[2][:20])
             s="%s/%s/%s"%(co,cn,g[2])
         else: s=ip
@@ -274,8 +275,8 @@ def m_step(old,dist):
 search={"input":"","type":None}
 
 def init_search(s=""):
+    if not s: search["type"]=None ; search["input"]="" ; return
     search["input"]=s
-    if not s: search["type"]=None ; return
     for c in s:
         if not c.isalpha(): break
     if c==":": # string search
@@ -560,7 +561,9 @@ while True:
         if filter_selected==1 and ch=='*': # special case! 'S' mode + * => unselect all & go to 'S+' mode
             while (i:=m_step(i,1))<num_mails: mails_flag[i]&=~MAILFLAG_SELECTED
             filter_selected=0; continue
-        init_search(box_input(0,0,"Select by:",search["input"]))
+        s=box_input(0,0,"Select by:",search["input"])
+        if s==None: continue # ESC
+        init_search(s)
         while (i:=m_step(i,1))<num_mails:
             ret=MAILFLAG_SELECTED if check_match(i) else 0
             if ch=='-': mails_flag[i]&=~ret
