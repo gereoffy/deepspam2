@@ -767,8 +767,8 @@ def get_mimedata(eml):
 
 #TAG_RE1 = re.compile(r'<[^>]+>')
 #TAG_RE2 = re.compile(r'\[[^[]+\]')
-TAG_RE3 = re.compile(r'https? ?: ?//[-._a-zA-Z0-9/?&=#]*')
-TAG_RE4 = re.compile(r'[-+$_.a-z0-9=]*@[-.a-z0-9]*\.[a-z][a-z][a-z]*')
+TAG_RE3 = re.compile(r'https? ?: ?//[-._a-zA-Z0-9/?&=#@]*')
+TAG_RE4 = re.compile(r'[-+_$=_.A-Za-z0-9]*@[-.a-z0-9]*\.[a-z][a-z][a-z]*')
 TAG_RE5 = re.compile(r'[1-9][-.,:/0-9 ]+[0-9]')
 TAG_RE6 = re.compile(r'[a-zA-Z][a-zA-Z][-.0-9a-zA-Z]*\.hu')
 
@@ -782,6 +782,15 @@ def remove_url(text):
 #    text=TAG_RE5.sub('<NUMBER>', text)
     return text
 
+# *****SPAM{15.0}*****
+STAG_SA = re.compile(r'\*\*\*\*\*SPAM[{(][0-9][.0-9]*[)}]\*\*\**')
+
+def remove_spamtag(text):
+    text=STAG_SA.sub("", text) # Spamassassin
+    text=text.replace("*****SPAM*****","").replace("[SPAM]","").replace("[Spam]","")
+    text=text.replace("[SpaM]","").replace("[E:spam]","").replace("[E:infected]","") # ESETS
+    text=text.replace("[K:Spam]","").replace("[K:Phishing]","").replace("[K:Virus]","").replace("[K:Mass]","") # Kaspersky
+    return text
 
 def vocab_split(preview):
 #    preview=remove_url(preview)
