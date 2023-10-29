@@ -12,13 +12,18 @@ labels = []  # list of label ids
 
 def loadtext(path,label_id):
     for t in open("data/"+path,"r"):
-        texts.append(t)
+        if len(t)<10: continue # too short
+        t="\n".join(t.split("|",1)) # subject + body
+        texts.append(t[:1024])
         labels.append(label_id)
+        #
+        #texts.append(t[:1024].lower())
+        #labels.append(label_id)
 
 loadtext("SPAM.mbox.txt",0)
 loadtext("HAM.mbox.txt",1)
 num_train=len(texts)
-loadtext("SPAM-test2.txt",0)
+loadtext("SPAM-test.txt",0)
 loadtext("HAM-test.txt",1)
 num_all=len(texts)
 num_val=num_all-num_train
