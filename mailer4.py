@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 #from cdifflib import CSequenceMatcher as SequenceMatcher
 
 from hdrdecode import parse_from,hdrdecode3,decodeline
-from eml2str import eml2str,get_mimedata,vocab_split,remove_url
+from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag
 from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
@@ -95,6 +95,13 @@ def readfolder(f):
   if eml: do_eml(eml,fpos)
   print(fpos,eml)
 
+def get_subject(yy):
+    s=mails_meta[yy]["subject"]
+    s=remove_spamtag(s)
+    s=s.replace("|","/")
+    s=ucsremove(s) # remove unicode shit
+    s=" ".join(s.split()) # fix whitespace
+    return s
 
 def get_preview(yy):
     # preview?
@@ -106,7 +113,7 @@ def get_preview(yy):
         preview=" ".join(preview.split()) # fix whitespace
 #        preview=preview[:term_pl] # truncate to ~1000 chars
         mails_text[yy]=preview
-        if ds: mails_deep[yy]=ds(preview) # use deepspam model
+        if ds: mails_deep[yy]=ds(get_subject(yy)+"\n"+preview+"\n") # use deepspam model
     return preview
 
 def get_deep(yy):
@@ -204,7 +211,8 @@ try:
         print("Calculating deepspam values...")
         yy=0
         while yy<len(mails_text):
-            mails_deep+=ds.evalbatch(mails_text[yy:yy+256]) # Batch eval
+            mails_deep+=ds.evalbatch([(get_subject(y)+"\n"+mails_text[y]+"\n") for y in range(yy,min(yy+256,len(mails_text)))])  # Batch eval
+#            mails_deep+=ds.evalbatch(mails_text[yy:yy+256]) # Batch eval
             yy+=256
             print(yy,end="\r")
 except:
@@ -444,7 +452,7 @@ def drawall():
                 lasta,lastb=block[0]+block[2],block[1]+block[2]
             sys.stdout.write('\x1b[0J') # clear the rest
         elif ds and mode_preview==4:
-            preview=ds.tokenized([preview])[0]
+            preview=ds.tokenized([get_subject(yy)+"\n"+preview+"\n"])[0]
             print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
         elif mode_preview==3:
             l=0
@@ -587,7 +595,7 @@ while True:
             sel=box_message(["Tag %d emails?"%(len(tagged))]+tags,y=1)
             if sel>0:
                 with open(fnev+".tag_"+tags[sel-1],"wt",encoding="utf-8",errors="ignore") as f:
-                    for i in tagged: f.write("%s:%d:%s\n"%(fnev,i,get_preview(i)))
+                    for i in tagged: f.write("%s:%d:%s|%s\n"%(fnev,i,get_subject(i),get_preview(i)))
         if ch=='[':
             sel=box_input(t1="Filename to export %d emails?"%(len(tagged)))
             with open(sel,"wb") as f:
