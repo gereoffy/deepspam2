@@ -1,7 +1,9 @@
 
 import time
 import torch
-from sentencepiece
+import pickle
+import sentencepiece
+from .ds1token import DS1Tokenizer
 
 class DeepSpam_model(torch.nn.Module):
 
@@ -37,18 +39,22 @@ class DeepSpam:
     print(s)
     if self.logf: self.logf.write(str(s)+"\n")
 
-  def __init__(self,path="model/",device="cpu",load="deepspam.pt"):
+  def __init__(self,path="model/",device="cpu",load="deepspam.pt",ds1=False):
     self.device=device
 
     # logging
     self.logf=open(path+'deepspam.log',"wt") if load==None else None # log to file if in train mode
     self.log("PyTorch version %s @ %s"%(str(torch.__version__), torch.cuda.get_device_name(0) if device=="cuda" else "CPU") )
 
-    # load pretrained tokernizer:
-    self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm.model')
+    # load tokenizer & pretrained embeddings:
+    if ds1:
+        wordmap,embedding_matrix = pickle.load(open(path+"all12sg.pck32.1M", "rb"))
+        self.tokenizer = DS1Tokenizer(wordmap)
+        embedding_tensors=torch.from_numpy(embedding_matrix).float().to(device)
+    else:
+        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm.model')
+        embedding_tensors=torch.load(path+"embeddings.pt",map_location=device)
 
-    # load pretrained embeddings:
-    embedding_tensors=torch.load(path+"embeddings.pt",map_location=device)
     embedding_tensors.requires_grad=False
     num_words,num_dim=embedding_tensors.size()
     embedding_tensors[0]*=0 # token #0 = mask/padding
@@ -127,9 +133,10 @@ class DeepSpam:
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
     self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
 
+    print(self.tokenized(texts[:2]))
+
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
     data=self.tokenize(self.preprocess(texts),max_len)
-    print(self.tokenized(texts[:2]))
     
     data=torch.tensor(data,dtype=torch.int,device=self.device)
     labels=torch.nn.functional.one_hot(torch.tensor(label_ids),2).float().to(self.device)
