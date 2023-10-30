@@ -113,7 +113,7 @@ def get_preview(yy):
         preview=" ".join(preview.split()) # fix whitespace
 #        preview=preview[:term_pl] # truncate to ~1000 chars
         mails_text[yy]=preview
-        if ds: mails_deep[yy]=ds(get_subject(yy)+"\n"+preview+"\n") # use deepspam model
+        if ds: mails_deep[yy]=ds((get_subject(yy),preview)) # use deepspam model
     return preview
 
 def get_deep(yy):
@@ -211,7 +211,7 @@ try:
         print("Calculating deepspam values...")
         yy=0
         while yy<len(mails_text):
-            mails_deep+=ds.evalbatch([(get_subject(y)+"\n"+mails_text[y]+"\n") for y in range(yy,min(yy+256,len(mails_text)))])  # Batch eval
+            mails_deep+=ds.evalbatch([(get_subject(y),mails_text[y]) for y in range(yy,min(yy+256,len(mails_text)))])  # Batch eval
 #            mails_deep+=ds.evalbatch(mails_text[yy:yy+256]) # Batch eval
             yy+=256
             print(yy,end="\r")
@@ -452,7 +452,7 @@ def drawall():
                 lasta,lastb=block[0]+block[2],block[1]+block[2]
             sys.stdout.write('\x1b[0J') # clear the rest
         elif ds and mode_preview==4:
-            preview=ds.tokenized([get_subject(yy)+"\n"+preview+"\n"])[0]
+            preview=ds.tokenized([(get_subject(yy),preview)])[0]
             print(wcfixstr(preview)[:term_pl],'\x1b[0J') # erase to end of screen
         elif mode_preview==3:
             l=0

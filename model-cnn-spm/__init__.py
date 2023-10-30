@@ -1,11 +1,11 @@
 
 import time
 import torch
-import sentencepiece
+from sentencepiece
 
 class DeepSpam_model(torch.nn.Module):
 
-    def __init__(self, ndim, filter_sizes=[2, 3, 4, 5], num_classes=2, dropout=0.5, filters=256, hidden=128):
+    def __init__(self, ndim, filter_sizes=[2, 3, 4, 5], num_classes=2, dropout=0.5, filters=128, hidden=32):
         super().__init__()
         self.convl = torch.nn.ModuleList([ torch.nn.Conv1d(in_channels=ndim, out_channels=filters, kernel_size=k, padding="valid") for k in filter_sizes ])
         self.l_dr2 = torch.nn.Dropout(dropout,inplace=True)
@@ -66,23 +66,30 @@ class DeepSpam:
     all_params = sum([p.numel() for p in self.model.parameters()])
     self.log("MODEL: vocab=%d  embed=%d  params=%d"%(num_words,num_dim,all_params))
 
+  # texts: array of strings or string pairs: (subject,body)
+  def preprocess(self,texts):
+    # TODO: optional lowercase, unicode normalization, accents removal, confusables fix, url/email remove...
+#    if isinstance(texts, str): return [texts]
+    if isinstance(texts[0], str): return texts
+    return ["|\n".join(t) for t in texts]
+#    return [("|\n".join(t)).lower() for t in texts]
+
+  def tokenized(self,texts):
+    return [" ".join(d) for d in self.tokenizer.encode_as_pieces(self.preprocess(texts))]
 
   def tokenize(self,texts,max_len=None):
     # tokenize array of texts to input_ids & optional truncating / padding:
     data = []
-    for d in self.tokenizer.encode(texts):
+    for d in self.tokenizer.encode(self.preprocess(texts)):
         if max_len:
             d=d[:max_len] # truncate
             d+=[0]*(max_len-len(d)) # add padding
         data.append(d)
     return data
 
-  def tokenized(self,texts):
-    return [" ".join(d) for d in self.tokenizer.encode_as_pieces(texts)]
-
   def __call__(self,text,max_len=MAX_BLOCK,min_len=MIN_BLOCK):
     with torch.no_grad():
-        tokens=self.tokenize([text],max_len)
+        tokens=self.tokenize(self.preprocess([text]),max_len)
         if len(tokens[0])<min_len: return -1 # too short
 #        return len(tokens[0])
         input_ids=torch.tensor(tokens,dtype=torch.int,device=self.device)
@@ -93,7 +100,7 @@ class DeepSpam:
 
   def evalbatch(self,texts,max_len=MAX_BLOCK,min_len=MIN_BLOCK):
     with torch.no_grad():
-        tokens=self.tokenize(texts,max_len)
+        tokens=self.tokenize(self.preprocess(texts),max_len)
         input_ids=torch.tensor(tokens,dtype=torch.int,device=self.device)
         logits=self.model(self.embedding(input_ids))
 #        print(logits[0:10])
@@ -115,13 +122,15 @@ class DeepSpam:
   def save(self,path="model/"):
     torch.save(self.model.state_dict(), path+'deepspam.pt')
 
-  def train(self,texts,label_ids,num_train,epochs=25,batch_size=256,max_len=MAX_BLOCK,dropwords=10,savebest=True):
+  def train(self,texts,label_ids,num_train,epochs=50,batch_size=64,max_len=MAX_BLOCK,dropwords=10,savebest=True):
 
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
     self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
-    data=self.tokenize(texts,max_len)
+    data=self.tokenize(self.preprocess(texts),max_len)
+    print(self.tokenized(texts[:2]))
+    
     data=torch.tensor(data,dtype=torch.int,device=self.device)
     labels=torch.nn.functional.one_hot(torch.tensor(label_ids),2).float().to(self.device)
 #    print('Shape of data tensor:' + str(data.shape))    #Shape of data tensor: (118952, 100)
@@ -141,7 +150,7 @@ class DeepSpam:
     loss_fn=torch.nn.BCEWithLogitsLoss()
 
     #optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-07) # keras defaults
-    optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-4,  weight_decay=1e-1, betas=(0.9, 0.95) )
+    optimizer = torch.optim.AdamW(self.model.parameters(), lr=2e-5,  weight_decay=1e-1, betas=(0.9, 0.95) )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs, 1e-5, verbose=False) # 2x jobb a final loss/acc vele mint nelkule!
 #    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 
@@ -193,13 +202,9 @@ class DeepSpam:
         t1=time.time()
 
         # eval
-
-        test_ham=0
-        test_hamcnt=0
-        test_spam=0
-        test_spamcnt=0
-        test_fp=0
-        test_fn=0
+        test_spamcnt=test_hamcnt=0 # total no. of spam/ham in dataset
+        test_spam=test_ham=0       # number of correctly detected spam/ham
+        test_fp=test_fn=0          # number of incorrectly detected spam/ham
 
         self.model.eval()
         with torch.no_grad():
@@ -229,10 +234,10 @@ class DeepSpam:
                     else: test_hamcnt+=1                # 1=positive (ham)
                     if res1>0.8: # ham detected
                         if label_ids[i]==1: test_ham+=1
-                        else: test_fn+=1
+                        else: test_fn+=1  # number of spam detected as ham
                     elif res0>0.8: # spam detected
                         if label_ids[i]==0: test_spam+=1
-                        else: test_fp+=1
+                        else: test_fp+=1  # number of ham detected as spam
                     i+=1
 
             i-=num_train
@@ -240,7 +245,7 @@ class DeepSpam:
             val_loss/=i
 
         # custom metrics for spam filtering:
-        test_acc=(1.0-test_spam/test_spamcnt) + test_fn/test_spam + 3.0*test_fp/test_ham # ratio of non-detected spam + ratio of FNs + 3x ratio of FPs
+        test_acc=(1.0-test_spam/test_spamcnt) + test_fn/test_spamcnt + 3.0*test_fp/test_hamcnt # ratio of non-detected spam + ratio of FNs + 3x ratio of FPs
 
         if ep<epochs/5:
             is_best='.' # warmup :)
@@ -253,6 +258,6 @@ class DeepSpam:
 
         self.log("%3d:  loss=%6.4f acc=%6.4f  val: %6.4f / %6.4f / %6.4f %s (%5.2f+%4.2f sec) lr:%10.8f  HAM:%6.2f/%5.3f%%  SPAM:%6.2f/%5.3f%% "%
             (ep+1, t_loss,t_acc, val_loss,val_acc,test_acc, is_best, t1-t0, time.time()-t1, t_lr,
-            100.0*test_ham/test_hamcnt, 100.0*test_fp/test_ham, 100.0*test_spam/test_spamcnt, 100.0*test_fn/test_spam ) )
+            100.0*test_ham/test_hamcnt, 100.0*test_fp/test_hamcnt, 100.0*test_spam/test_spamcnt, 100.0*test_fn/test_spamcnt ) )
 
 
