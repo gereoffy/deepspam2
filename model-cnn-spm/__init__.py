@@ -43,7 +43,7 @@ class DeepSpam:
     self.device=device
 
     # logging
-    self.logf=open(path+'deepspam.log',"wt") if load==None else None # log to file if in train mode
+    self.logf=open(path+'deepspam.log',"at") if load==None else None # log to file if in train mode
     self.log("PyTorch version %s @ %s"%(str(torch.__version__), torch.cuda.get_device_name(0) if device=="cuda" else "CPU") )
 
     # load tokenizer & pretrained embeddings:
@@ -52,8 +52,8 @@ class DeepSpam:
         self.tokenizer = DS1Tokenizer(wordmap)
         embedding_tensors=torch.from_numpy(embedding_matrix).float().to(device)
     else:
-        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm.model')
-        embedding_tensors=torch.load(path+"embeddings.pt",map_location=device)
+        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm5.model')
+        embedding_tensors=torch.load(path+"embeddings5.pt",map_location=device)
 
     embedding_tensors.requires_grad=False
     num_words,num_dim=embedding_tensors.size()
@@ -77,8 +77,8 @@ class DeepSpam:
     # TODO: optional lowercase, unicode normalization, accents removal, confusables fix, url/email remove...
 #    if isinstance(texts, str): return [texts]
     if isinstance(texts[0], str): return texts
-    return ["|\n".join(t) for t in texts]
-#    return [("|\n".join(t)).lower() for t in texts]
+#    return ["|\n".join(t) for t in texts]
+    return [("|\n".join(t)).lower() for t in texts]
 
   def tokenized(self,texts):
     return [" ".join(d) for d in self.tokenizer.encode_as_pieces(self.preprocess(texts))]
@@ -128,12 +128,16 @@ class DeepSpam:
   def save(self,path="model/"):
     torch.save(self.model.state_dict(), path+'deepspam.pt')
 
-  def train(self,texts,label_ids,num_train,epochs=50,batch_size=64,max_len=MAX_BLOCK,dropwords=10,savebest=True):
+  def load(self,path="model/",load="deepspam.pt"):
+    self.model.load_state_dict(torch.load(path+load,map_location=self.device))
+    self.model.eval()
+
+  def train(self,texts,label_ids,num_train,epochs=25,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
 
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
     self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
 
-    print(self.tokenized(texts[:2]))
+#    print(self.tokenized(texts[:2]))
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
     data=self.tokenize(self.preprocess(texts),max_len)
@@ -148,7 +152,7 @@ class DeepSpam:
     for i in range(max_len):
         m=[1]*max_len
         m[i]=0
-        m[(i+1)%max_len]=0 # mask token pair...
+#        m[(i+1)%max_len]=0 # mask token pair...
         masks.append(m)
     masks=torch.tensor(masks).to(self.device)
 
@@ -157,7 +161,7 @@ class DeepSpam:
     loss_fn=torch.nn.BCEWithLogitsLoss()
 
     #optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-07) # keras defaults
-    optimizer = torch.optim.AdamW(self.model.parameters(), lr=2e-5,  weight_decay=1e-1, betas=(0.9, 0.95) )
+    optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr1,  weight_decay=1e-1, betas=(0.9, 0.95) )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs, 1e-5, verbose=False) # 2x jobb a final loss/acc vele mint nelkule!
 #    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 
@@ -174,12 +178,14 @@ class DeepSpam:
 
         t_loss=0.0
         t_acc=0
+        shufflei=torch.randperm(num_train)
 
         self.model.train()
         for step in range(ep_size):
 
             # get batch
-            ix = torch.randint(num_train-batch_size, (batch_size,))
+#            ix = torch.randint(num_train-batch_size, (batch_size,))
+            ix = shufflei[step*batch_size:step*batch_size+batch_size]
             x = data[ix]
             y = labels[ix]
 
@@ -209,9 +215,10 @@ class DeepSpam:
         t1=time.time()
 
         # eval
-        test_spamcnt=test_hamcnt=0 # total no. of spam/ham in dataset
-        test_spam=test_ham=0       # number of correctly detected spam/ham
-        test_fp=test_fn=0          # number of incorrectly detected spam/ham
+        test_spamcnt=test_hamcnt=0   # total no. of spam/ham in dataset
+        test_spam=test_ham=0         # number of correctly detected spam/ham
+        test_fp=test_fn=0            # number of incorrectly detected spam/ham
+        test_spamsum=test_hamsum=0.0 # sum of sigmoid results for spam/ham samples
 
         self.model.eval()
         with torch.no_grad():
@@ -236,15 +243,27 @@ class DeepSpam:
 
                 for res in probs:
                     res0=res[0]/(res[0]+res[1]) # normalize sigmoid result
-                    res1=res[1]/(res[0]+res[1])
-                    if label_ids[i]==0: test_spamcnt+=1 # 0=negative (spam)
-                    else: test_hamcnt+=1                # 1=positive (ham)
-                    if res1>0.8: # ham detected
-                        if label_ids[i]==1: test_ham+=1
-                        else: test_fn+=1  # number of spam detected as ham
-                    elif res0>0.8: # spam detected
-                        if label_ids[i]==0: test_spam+=1
-                        else: test_fp+=1  # number of ham detected as spam
+                    if label_ids[i]==0:     ### SPAM sample  [0=negative]
+                        test_spamcnt+=1
+                        test_spamsum+=res0
+                        if res0>0.8: test_spam+=1
+                        elif res0<0.2: test_fn+=1  # number of spam detected as ham
+                    else: # label_ids[0]==1 ### HAM sample [1=positive]
+                        test_hamcnt+=1
+                        test_hamsum+=res0
+                        if res0<0.2: test_ham+=1
+                        elif res0>0.8: test_fp+=1  # number of ham detected as spam
+
+#                    res1=res[1]/(res[0]+res[1])
+#                    if label_ids[i]==0: test_spamcnt+=1 # 0=negative (spam)
+#                    else: test_hamcnt+=1                # 1=positive (ham)
+#                    if res1>0.8: # ham detected
+#                        if label_ids[i]==1: test_ham+=1
+#                        else: test_fn+=1  # number of spam detected as ham
+#                    elif res0>0.8: # spam detected
+#                        if label_ids[i]==0: test_spam+=1
+#                        else: test_fp+=1  # number of ham detected as spam
+
                     i+=1
 
             i-=num_train
@@ -252,9 +271,9 @@ class DeepSpam:
             val_loss/=i
 
         # custom metrics for spam filtering:
-        test_acc=(1.0-test_spam/test_spamcnt) + test_fn/test_spamcnt + 3.0*test_fp/test_hamcnt # ratio of non-detected spam + ratio of FNs + 3x ratio of FPs
+        test_acc=(1.0-test_spam/test_spamcnt) + 3.0*test_fn/test_spamcnt + 3.0*test_fp/test_hamcnt # ratio of non-detected spam + 3x ratio of FNs + 3x ratio of FPs
 
-        if ep<epochs/5:
+        if ep<5: #epochs/5:
             is_best='.' # warmup :)
             best_acc=test_acc
         elif test_acc<best_acc-0.0002:
@@ -263,8 +282,9 @@ class DeepSpam:
             if savebest: self.save()
         else: is_best=' '
 
-        self.log("%3d:  loss=%6.4f acc=%6.4f  val: %6.4f / %6.4f / %6.4f %s (%5.2f+%4.2f sec) lr:%10.8f  HAM:%6.2f/%5.3f%%  SPAM:%6.2f/%5.3f%% "%
+        self.log("%3d:  loss=%6.4f acc=%6.4f  val: %6.4f / %6.4f / %6.4f %s (%5.2f+%4.2f sec) lr:%10.8f  HAM:%6.2f/%5.3f%% (%4.1f)  SPAM:%6.2f/%5.3f%% (%4.1f) "%
             (ep+1, t_loss,t_acc, val_loss,val_acc,test_acc, is_best, t1-t0, time.time()-t1, t_lr,
-            100.0*test_ham/test_hamcnt, 100.0*test_fp/test_hamcnt, 100.0*test_spam/test_spamcnt, 100.0*test_fn/test_spamcnt ) )
+            100.0*test_ham/test_hamcnt, 100.0*test_fp/test_hamcnt, 100.0*test_hamsum/test_hamcnt,
+            100.0*test_spam/test_spamcnt, 100.0*test_fn/test_spamcnt, 100.0*test_spamsum/test_spamcnt ) )
 
 
