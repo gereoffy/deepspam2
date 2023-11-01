@@ -1,9 +1,8 @@
 #! /usr/bin/python3
 
-import time
+import time,os
 from model import DeepSpam
 
-t0=time.time()
 
 print('Processing text dataset')
 texts = []  # list of text samples
@@ -31,15 +30,25 @@ print('Found %d texts. (%d+%d)' % (num_all,num_train,num_val))
 
 #####################################################################################################
 
-# train new model
-ds=DeepSpam(device="cuda",load=None)
-ds.train(texts,labels,num_train)
-##ds.save()
+#  def train(self,texts,label_ids,num_train,epochs=50,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
 
-print("Total TIME: %5.3f sec"%(time.time()-t0))
-
-# test
-text="are you looking for a business loan personal loan home loan car loan student loan debt consolidation loan unsecured loan venture capital etc . or were you refused a loan by a bank or a financial setting for one or more reasons . you in the right place for your loan solutions ! email us right now at emailaddress this email and any files transmitted with it are confidential and intended solely for the use of the individual or entity to whom they are addressed . if you have received this email in error please notify the system manager . please note that any views or opinions presented in this email are solely those of the author and do not necessarily represent those of postal corporation of kenya . finally the recipient should check this email and any attachments for the presence of viruses . postal corporation of kenya accepts no liability for any damage caused by any virus transmitted by this email . postal corporation of kenya p . o box ##### ##### kenyatta avenue nairobi kenya domainname . ke"
-res=ds(text)
-print(res,text[:128])
-
+#for bs in [8,16,32,64,128,256,512,1024,2048]:
+for bs in [64,48,32,24,16,12,8,4]:
+#    for lr in [0.0002,0.0001,0.00005,0.00002,0.00001]:
+    for lr in [0.005,0.003,0.002,0.001,0.0005,0.0002,0.0001]:
+        # train new model
+        t0=time.time()
+        ds=DeepSpam(device="cuda",load=None,ds1=False)
+        ds.train(texts,labels,num_train,batch_size=bs,lr1=lr)
+        print("Total TIME: %5.3f sec"%(time.time()-t0))
+        try:
+            ds.load() # rollback to last saved checkpoint
+            for text in open("Junk.txt","rt"):
+                res=ds(text.split("|",1))
+                print("%6.3f%%"%res,text[:128])
+            # rename!
+            fn="model/deepspam-%d.pt"%(int(t0))
+            os.rename("model/deepspam.pt",fn)
+            print("FILENAME:",fn)
+        except Exception as e: print(repr(e))
+        del ds
