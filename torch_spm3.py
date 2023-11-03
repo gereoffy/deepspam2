@@ -33,13 +33,13 @@ print('Found %d texts. (%d+%d)' % (num_all,num_train,num_val))
 #  def train(self,texts,label_ids,num_train,epochs=50,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
 
 #for bs in [8,16,32,64,128,256,512,1024,2048]:
-for bs in [64,48,32,24,16,12,8,4]:
+for bs in [512,256,192,128,96,64,48,32,24,16,12,8,4]:
 #    for lr in [0.0002,0.0001,0.00005,0.00002,0.00001]:
     for lr in [0.005,0.003,0.002,0.001,0.0005,0.0002,0.0001]:
         # train new model
         t0=time.time()
-        ds=DeepSpam(device="cuda",load=None,ds1=False)
-        ds.train(texts,labels,num_train,batch_size=bs,lr1=lr)
+        ds=DeepSpam(device="cuda",load=None,ds1=False,logfile=open("deepspam.log","at"))
+        saved=ds.train(texts,labels,num_train,batch_size=bs,lr1=lr)
         print("Total TIME: %5.3f sec"%(time.time()-t0))
         try:
             ds.load() # rollback to last saved checkpoint
@@ -47,7 +47,7 @@ for bs in [64,48,32,24,16,12,8,4]:
                 res=ds(text.split("|",1))
                 print("%6.3f%%"%res,text[:128])
             # rename!
-            fn="model/deepspam-%d.pt"%(int(t0))
+            fn="model/deepspam-%d-%d-%d.pt"%(int(t0),bs,saved) # timestamp, batchsize, epoch
             os.rename("model/deepspam.pt",fn)
             print("FILENAME:",fn)
         except Exception as e: print(repr(e))

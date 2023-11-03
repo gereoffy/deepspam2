@@ -39,11 +39,11 @@ class DeepSpam:
     print(s)
     if self.logf: self.logf.write(str(s)+"\n")
 
-  def __init__(self,path="model/",device="cpu",load="deepspam.pt",ds1=False):
+  def __init__(self,path="model/",device="cpu",load="deepspam.pt",ds1=False,logfile=None):
     self.device=device
 
     # logging
-    self.logf=open(path+'deepspam.log',"at") if load==None else None # log to file if in train mode
+    self.logf=logfile # open(logfile,"at") if logfile else None # log to file if in train mode
     self.log("PyTorch version %s @ %s"%(str(torch.__version__), torch.cuda.get_device_name(0) if device=="cuda" else "CPU") )
 
     # load tokenizer & pretrained embeddings:
@@ -63,9 +63,8 @@ class DeepSpam:
     # create classification model:
     self.model=DeepSpam_model(num_dim)
     self.model.to(device)
-    if load:
-        self.model.load_state_dict(torch.load(path+load,map_location=device))
-        self.model.eval()
+
+    if load: self.load(path+load)
 
     # print summary:
     self.log(self.model)
@@ -128,8 +127,8 @@ class DeepSpam:
   def save(self,path="model/"):
     torch.save(self.model.state_dict(), path+'deepspam.pt')
 
-  def load(self,path="model/",load="deepspam.pt"):
-    self.model.load_state_dict(torch.load(path+load,map_location=self.device))
+  def load(self,load="model/deepspam.pt"):
+    self.model.load_state_dict(torch.load(load,map_location=self.device))
     self.model.eval()
 
   def train(self,texts,label_ids,num_train,epochs=25,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
@@ -169,6 +168,7 @@ class DeepSpam:
     val_loss=0
     val_acc=0
     best_acc=0
+    saved=0
 
     for ep in range(epochs):
 
@@ -273,13 +273,14 @@ class DeepSpam:
         # custom metrics for spam filtering:
         test_acc=(1.0-test_spam/test_spamcnt) + 3.0*test_fn/test_spamcnt + 3.0*test_fp/test_hamcnt # ratio of non-detected spam + 3x ratio of FNs + 3x ratio of FPs
 
-        if ep<5: #epochs/5:
+        if ep<3: #epochs/5:
             is_best='.' # warmup :)
             best_acc=test_acc
         elif test_acc<best_acc-0.0002:
             best_acc=test_acc
             is_best='*'
             if savebest: self.save()
+            saved=ep+1
         else: is_best=' '
 
         self.log("%3d:  loss=%6.4f acc=%6.4f  val: %6.4f / %6.4f / %6.4f %s (%5.2f+%4.2f sec) lr:%10.8f  HAM:%6.2f/%5.3f%% (%4.1f)  SPAM:%6.2f/%5.3f%% (%4.1f) "%
@@ -287,4 +288,5 @@ class DeepSpam:
             100.0*test_ham/test_hamcnt, 100.0*test_fp/test_hamcnt, 100.0*test_hamsum/test_hamcnt,
             100.0*test_spam/test_spamcnt, 100.0*test_fn/test_spamcnt, 100.0*test_spamsum/test_spamcnt ) )
 
+    return saved
 
