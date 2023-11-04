@@ -116,7 +116,7 @@
 0x000B4	´		[mapped] accent
 0x000B5	µ	µ	[chars]
 0x000B6	¶	¶	[chars]
-0x000B7	·		[chars] middle dot
+0x000B7	·	·	[chars] middle dot
 0x000B8	¸		[mapped] accent
 0x000B9	¹	¹	[chars]
 0x000BA	º		[mapped] male
@@ -269,8 +269,8 @@
 0x0014D	ō	o	[mapped]
 0x0014E	Ŏ	o	[mapped]
 0x0014F	ŏ	o	[mapped]
-0x00150	Ő	o	[mapped]
-0x00151	ő	o	[mapped]
+0x00150	Ő	ő	[mapped]
+0x00151	ő	ő	[mapped]
 0x00152	Œ	oe	[mapped]
 0x00153	œ	oe	[mapped]
 0x00154	Ŕ	r	[mapped]
@@ -410,7 +410,7 @@
 0x001DA	ǚ	u	[mapped]
 0x001DB	Ǜ	u	[mapped]
 0x001DC	ǜ	u	[mapped]
-0x001DD	ǝ	e	ǝ !!!
+0x001DD	ǝ	ǝ	ǝ !!!
 0x001DE	Ǟ	a	[mapped]
 0x001DF	ǟ	a	[mapped]
 0x001E0	Ǡ	a	[mapped]
@@ -1064,7 +1064,7 @@
 0x01E98	ẘ	w	[mapped]
 0x01E99	ẙ	y	[mapped]
 0x01E9B	ẛ	s	[mapped]
-0x01E9E	ẞ	ß	[mapped]
+0x01E9E	ẞ	ss	[mapped]
 0x01EA0	Ạ	a	[mapped]
 0x01EA1	ạ	a	[mapped]
 0x01EA2	Ả	a	[mapped]
@@ -2026,7 +2026,7 @@
 0x0FFE1	￡	£	[mapped]
 0x0FFE2	￢	¬	[mapped]
 0x0FFE3	￣	 	[mapped]
-0x0FFE4	￤	¦	[mapped]
+0x0FFE4	￤	|	[mapped]
 0x0FFE5	￥	¥	[mapped]
 0x1D400	𝐀	a	[mapped]
 0x1D401	𝐁	b	[mapped]
