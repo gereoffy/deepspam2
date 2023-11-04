@@ -12,56 +12,40 @@ import numpy as np
 
 vocab={}
 numw=0
-for line in open("spm5.vocab","rt"):
+for line in open("spm6.vocab","rt"):
     w=line.split()[0]
-    vocab[w]=numw
+#    vocab[w]=numw
+    vocab[numw]=w
     numw+=1
 
+print(vocab[3])
+
 wcount=0
-wordmap={}
-symbols=[]
-for line in open("spm5.wv","rt"):
+for line in open("spm6.wv","rt"):
     v=line.strip().split(" ")
     if len(v)<64:
         print(v)
 #        embedding_matrix = np.zeros((int(v[0])+1, int(v[1])),dtype='float32')
         embedding_matrix = np.zeros((numw, int(v[1])),dtype='float32')
         continue
+    wcount+=1
 
-    w=v[0]
-    if w in vocab:
+    i=int(v[0])
+    embedding_matrix[i] = np.asarray(v[1:], dtype='float32')
 
-        wcount+=1
-        wordmap[w]=wcount
-
-        i=vocab[w]
-        embedding_matrix[i] = np.asarray(v[1:], dtype='float32')
-#        if len(w)<3: print("Short:",w)
-
-        for c in w:
-            if not c in symbols: symbols.append(c)
-
-        del vocab[w]
-        continue
-
-    print("WV-only:",w)
+    w=vocab[i]
+    del vocab[i]
 
 for w in vocab:
-    print("SPM-only:",w,vocab[w])
+    print("Vocab-only:",w,vocab[w])
+
 
 print('Words found: %d / %d'%(wcount,numw))
 
-symbols.sort()
-print("Charset:","".join(symbols))
-
-#import pickle
-#alldata=(wordmap,embedding_matrix)
-#pickle.dump(alldata, open("spm5.pck", "wb"))
 
 import torch
 w=torch.from_numpy(embedding_matrix).float()#.to(device)
 print(w.size())
 print(w)
-torch.save(w,"embeddings.pt")
-
+torch.save(w,"embeddings6.pt")
 
