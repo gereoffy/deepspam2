@@ -4,6 +4,7 @@ import torch
 import pickle
 import sentencepiece
 from .ds1token import DS1Tokenizer
+from .ds2prep import DS2Preprocessor
 
 class DeepSpam_model(torch.nn.Module):
 
@@ -55,6 +56,8 @@ class DeepSpam:
         self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm5.model')
         embedding_tensors=torch.load(path+"embeddings5.pt",map_location=device)
 
+    self.preprocess = DS2Preprocessor(path+"unicodes6x.map")
+
     embedding_tensors.requires_grad=False
     num_words,num_dim=embedding_tensors.size()
     embedding_tensors[0]*=0 # token #0 = mask/padding
@@ -72,7 +75,7 @@ class DeepSpam:
     self.log("MODEL: vocab=%d  embed=%d  params=%d"%(num_words,num_dim,all_params))
 
   # texts: array of strings or string pairs: (subject,body)
-  def preprocess(self,texts):
+  def old_preprocess(self,texts):
     # TODO: optional lowercase, unicode normalization, accents removal, confusables fix, url/email remove...
 #    if isinstance(texts, str): return [texts]
     if isinstance(texts[0], str): return texts
@@ -136,7 +139,7 @@ class DeepSpam:
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
     self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
 
-#    print(self.tokenized(texts[:2]))
+    print(self.tokenized(texts[:2]))
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
     data=self.tokenize(self.preprocess(texts),max_len)
