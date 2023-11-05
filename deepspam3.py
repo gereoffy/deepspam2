@@ -24,49 +24,22 @@ except:
 
 ############################################################################################################################################
 
-import email
-from eml2token import eml2str,tokenize,eprint
+from eml2str import eml2str
+from model import DeepSpam
 
-from ds_model import deepspam_load,deepspam_test
-wordmap=deepspam_load()
+ds=DeepSpam()
+
 
 def do_eml(msg,addr):
-#  # jobb ha bytes-ban kapja meg a raw levelet, mert az utf8 karakterek kulonben elcseszodhetnek! pl. sql_0000022480.eml ahol keverve van htmlentity es utf8 text/plain-ben!
-#  if type(eml)==bytes:
-#    msg = email.message_from_bytes(eml)
-#  else:
-#    msg = email.message_from_string(eml)
-#  try:
-#    print len(eml)
-    vtokens=[]
-    tokens=[]
-    for text in eml2str(msg):
-      if text.find('pam detection software, running on the system')>=0:
-        continue
-      t=" ".join(text.replace('"',' ').split())
-#      print(t.encode("utf-8"))
-      if(len(t)>10):
-#        print(str(label)+" "+t.encode("utf-8"))
-        try:
-          vtok,tok=tokenize(t,wordmap)
-          if len(vtok)>len(vtokens):
-            vtokens=vtok
-            tokens=tok
-        except:
-          eprint(traceback.format_exc())
-#    print('%3d  %22s  Connect'%(thread_cnt, self.addrs) )
-    print("---  %22s  tokens: %d / %d"%(addr,len(vtokens),len(tokens)))
-    if len(vtokens)<10:
-        return "toosmall"
-
-#    print(" ".join(vtokens))
-    res=deepspam_test(vtokens)
+    text=eml2str(msg,True) # extract subject,bodytext
+    res=ds(text)
+    if res<0: return "toosmall"
     res+=0.1
     print("---  %22s  result: %8.5f"%(addr,res))
 #    print(res)
 #    print("%d%%"%(res))
     try:
-        f=open("deepspam.res","at")
+        f=open("deepspam2.res","at")
         f.write("%3d%%:"%(res)+" ".join(tokens)+"\n")
         f.close()
     except:
