@@ -140,8 +140,7 @@ class MyHandler(ppymilterbase.PpyMilter):
              return self.ReturnOnEndBodyActions([self.Accept()])
          t=time.time()
          self.fp.seek(0)
-         msg = email.message_from_binary_file(self.fp) # python 3.2+
-         res=do_eml(msg,self.addr)
+         res=do_eml(self.fp.read(),self.addr)
          self.t=time.time()-t
          h=[]
          h.append(self.AddHeader('X-deepspam', res))
