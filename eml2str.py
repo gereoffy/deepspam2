@@ -659,8 +659,17 @@ def decode_payload(data,ctyp="text/html",charset=None):
     return data
 
 
-def eml2str(msg):
+def eml2str(msg,ds2=False):
   msg=parse_eml(msg,decode=True)
+
+  subject=None
+  if ds2: # extract subject
+    for h in msg["headers"]:
+      try:
+        hh=h.split(b':',1)
+        if hh[0].lower()==b'subject': subject=remove_spamtag(hdrdecode3(hh[1]))
+      except: pass
+
   def walk(eml):
     if eml["parts"]:
         for p in eml["parts"]: yield from walk(p)
@@ -679,7 +688,7 @@ def eml2str(msg):
 #        if not text or len(data)>20: text=data # a kesobbi szoveg vszinu jobb (html>text, delivery hibak utan csatolva az eredeti level, elol a spamassassin fejlece stb)
         if not text or (ctyp in ["text/html","application/ms-tnef"] and len(data)>20) or len(data)>len(text)//2 or text.startswith("Spam detection software,"): text=data
         if ctyp in ["text/html","application/ms-tnef"] and len(text)>200: break
-  return text
+  return (subject,text) if subject else text
 
 
 def eml2str_old(msg):
