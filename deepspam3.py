@@ -31,16 +31,20 @@ ds=DeepSpam()
 
 
 def do_eml(msg,addr):
+    t=time.time()
     text=eml2str(msg,True) # extract subject,bodytext
+    tokens=ds.tokenized([text])[0]
+    print(tokens)
     res=ds(text)
+    t=time.time()-t
+    print("---  %22s  result: %8.5f  (%5.3f ms)"%(addr,res,1000*t))
     if res<0: return "toosmall"
     res+=0.1
-    print("---  %22s  result: %8.5f"%(addr,res))
 #    print(res)
 #    print("%d%%"%(res))
     try:
         f=open("deepspam2.res","at")
-        f.write("%3d%%:"%(res)+" ".join(tokens)+"\n")
+        f.write("%3d%%: %s\n"%(res,tokens))
         f.close()
     except:
         pass
