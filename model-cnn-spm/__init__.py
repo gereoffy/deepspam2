@@ -8,7 +8,7 @@ from .ds2prep import DS2Preprocessor
 
 class DeepSpam_model(torch.nn.Module):
 
-    def __init__(self, ndim, filter_sizes=[2, 3, 4, 5], num_classes=2, dropout=0.5, filters=128, hidden=32):
+    def __init__(self, ndim, filter_sizes=[2, 3, 4, 5], num_classes=2, dropout=0.5, filters=128, hidden=128):
         super().__init__()
         self.convl = torch.nn.ModuleList([ torch.nn.Conv1d(in_channels=ndim, out_channels=filters, kernel_size=k, padding="valid") for k in filter_sizes ])
         self.l_dr2 = torch.nn.Dropout(dropout,inplace=True)
@@ -52,11 +52,11 @@ class DeepSpam:
         wordmap,embedding_matrix = pickle.load(open(path+"all12sg.pck32.1M", "rb"))
         self.tokenizer = DS1Tokenizer(wordmap)
         embedding_tensors=torch.from_numpy(embedding_matrix).float().to(device)
+        self.preprocess = self.old_preprocess
     else:
-        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm5.model')
-        embedding_tensors=torch.load(path+"embeddings5.pt",map_location=device)
-
-    self.preprocess = DS2Preprocessor(path+"unicodes6x.map")
+        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=path+'spm6.model')
+        embedding_tensors=torch.load(path+"embeddings6.pt",map_location=device)
+        self.preprocess = DS2Preprocessor(path+"unicodes6x.map")
 
     embedding_tensors.requires_grad=False
     num_words,num_dim=embedding_tensors.size()
@@ -76,11 +76,8 @@ class DeepSpam:
 
   # texts: array of strings or string pairs: (subject,body)
   def old_preprocess(self,texts):
-    # TODO: optional lowercase, unicode normalization, accents removal, confusables fix, url/email remove...
-#    if isinstance(texts, str): return [texts]
     if isinstance(texts[0], str): return texts
-#    return ["|\n".join(t) for t in texts]
-    return [("|\n".join(t)).lower() for t in texts]
+    return ["|\n".join(t) for t in texts]
 
   def tokenized(self,texts):
     return [" ".join(d) for d in self.tokenizer.encode_as_pieces(self.preprocess(texts))]
@@ -106,9 +103,9 @@ class DeepSpam:
         res=res[0]*100.0/(res[0]+res[1])
     return res.item() # 0.0 ... 100.0 %
 
-  def evalbatch(self,texts,max_len=MAX_BLOCK,min_len=MIN_BLOCK):
+  def evalbatch(self,texts,max_len=MAX_BLOCK,min_len=MIN_BLOCK,tokenized=False):
     with torch.no_grad():
-        tokens=self.tokenize(self.preprocess(texts),max_len)
+        tokens=texts if tokenized else self.tokenize(self.preprocess(texts),max_len)
         input_ids=torch.tensor(tokens,dtype=torch.int,device=self.device)
         logits=self.model(self.embedding(input_ids))
 #        print(logits[0:10])
@@ -134,12 +131,12 @@ class DeepSpam:
     self.model.load_state_dict(torch.load(load,map_location=self.device))
     self.model.eval()
 
-  def train(self,texts,label_ids,num_train,epochs=25,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
+  def train(self,texts,label_ids,num_train,epochs=15,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
 
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
     self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
 
-    print(self.tokenized(texts[:2]))
+#    print(self.tokenized(texts[:2]))
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
     data=self.tokenize(self.preprocess(texts),max_len)
@@ -164,7 +161,7 @@ class DeepSpam:
 
     #optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-07) # keras defaults
     optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr1,  weight_decay=1e-1, betas=(0.9, 0.95) )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs, 1e-5, verbose=False) # 2x jobb a final loss/acc vele mint nelkule!
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs, 0.1*lr1, verbose=False) # 2x jobb a final loss/acc vele mint nelkule!
 #    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 
     ep_size=num_train//batch_size
