@@ -20,7 +20,7 @@ class DS2Preprocessor:
     for c in ZERO_WIDTH_CF: self.unimap[chr(c)]=""
     self.unimap["\n"]="\n"
 
-    print(len(chars),chars)
+    print("Charset[%d]:"%len(chars),chars)
     for c in chars:
         if self.unimap[c]!=c: print("BAD map for %s -> %s"%(c,self.unimap[c]))
 
