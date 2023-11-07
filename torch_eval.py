@@ -7,20 +7,15 @@ eval_bs=1024
 
 ds=DeepSpam(device="cuda",load=None,ds1=False)
 
-samples=[ [], [] ]
-
-def loadtext(path,label_id):
+def loadtokens(path):
     texts=[]
     for t in open("data/"+path,"r"):
         if len(t)<10: continue # too short
         texts.append(t[:1024].split("|",1))
-    samples[label_id]=ds.tokenize(ds.preprocess(texts),ds.MAX_BLOCK)
+    return ds.tokenize(ds.preprocess(texts),ds.MAX_BLOCK)
 
-loadtext("SPAM-test.txt",0)
-loadtext("HAM-test.txt",1)
+samples=[ loadtokens("SPAM-test.txt"), loadtokens("HAM-test.txt") ]
 
-#samples=[   [l.split("|",1) for l in open("data/SPAM-test.txt","rt")], [l.split("|",1) for l in open("data/HAM-test.txt","rt")]   ]
-#print(len(samples[0]),len(samples[1]))
 
 for fnev in sys.argv[1:]:
     ds.load(fnev)
