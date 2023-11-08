@@ -8,7 +8,7 @@ from .ds2prep import DS2Preprocessor
 
 class DeepSpam_model(torch.nn.Module):
 
-    def __init__(self, ndim, filter_sizes=[2, 3, 4, 5], num_classes=2, dropout=0.5, filters=128, hidden=128):
+    def __init__(self, ndim, filter_sizes=[2, 3, 4, 5], num_classes=2, dropout=0.5, filters=128, hidden=32):
         super().__init__()
         self.convl = torch.nn.ModuleList([ torch.nn.Conv1d(in_channels=ndim, out_channels=filters, kernel_size=k, padding="valid") for k in filter_sizes ])
         self.l_dr2 = torch.nn.Dropout(dropout,inplace=True)
@@ -59,12 +59,12 @@ class DeepSpam:
         self.preprocess = DS2Preprocessor(path+"unicodes6x.map")
 
     embedding_tensors.requires_grad=False
-    num_words,num_dim=embedding_tensors.size()
+    self.num_words,self.num_dim=embedding_tensors.size()
     embedding_tensors[0]*=0 # token #0 = mask/padding
     self.embedding = torch.nn.Embedding.from_pretrained(embedding_tensors,freeze=True)
 
     # create classification model:
-    self.model=DeepSpam_model(num_dim)
+    self.model=DeepSpam_model(self.num_dim)
     self.model.to(device)
 
     if load: self.load(path+load)
@@ -72,7 +72,7 @@ class DeepSpam:
     # print summary:
     self.log(self.model)
     all_params = sum([p.numel() for p in self.model.parameters()])
-    self.log("MODEL: vocab=%d  embed=%d  params=%d"%(num_words,num_dim,all_params))
+    self.log("MODEL: vocab=%d  embed=%d  params=%d"%(self.num_words,self.num_dim,all_params))
 
   # texts: array of strings or string pairs: (subject,body)
   def old_preprocess(self,texts):
@@ -124,24 +124,31 @@ class DeepSpam:
 #        res=res[0]*100.0/(res[0]+res[1])
 #    return res.item() # 0.0 ... 100.0 %
 
-  def save(self,path="model/"):
-    torch.save(self.model.state_dict(), path+'deepspam.pt')
+  def save(self,path="model/deepspam.pt"):
+    torch.save(self.model.state_dict(), path)
 
-  def load(self,load="model/deepspam.pt"):
-    self.model.load_state_dict(torch.load(load,map_location=self.device))
+  def load(self,path="model/deepspam.pt"):
+    self.model.load_state_dict(torch.load(path,map_location=self.device))
     self.model.eval()
+
+  def reset(self):
+    # new model!
+    del self.model
+    self.model=DeepSpam_model(self.num_dim)
+    self.model.to(self.device)
 
   def train(self,texts,label_ids,num_train,epochs=15,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
 
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
-    self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
+#    self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
+    self.log("DATASET: %d train + %d eval = %d total"%(num_train,len(texts)-num_train,len(texts) ))
 
 #    print(self.tokenized(texts[:2]))
 
     # prepare dataset (array of texts and label_ids -> tokenized/onehot tensors):
-    data=self.tokenize(self.preprocess(texts),max_len)
+    # data=self.tokenize(self.preprocess(texts),max_len)
     
-    data=torch.tensor(data,dtype=torch.int,device=self.device)
+    data=torch.tensor(texts,dtype=torch.int,device=self.device)
     labels=torch.nn.functional.one_hot(torch.tensor(label_ids),2).float().to(self.device)
 #    print('Shape of data tensor:' + str(data.shape))    #Shape of data tensor: (118952, 100)
 #    print('Shape of label tensor:' + str(labels.shape)) #Shape of label tensor: (118952, 2)
@@ -168,7 +175,7 @@ class DeepSpam:
     val_loss=0
     val_acc=0
     best_acc=0
-    saved=0
+    saved=None
 
     for ep in range(epochs):
 
@@ -276,11 +283,12 @@ class DeepSpam:
         if ep<3: #epochs/5:
             is_best='.' # warmup :)
             best_acc=test_acc
-        elif test_acc<best_acc-0.0002:
+        elif test_acc<best_acc-0.0001:
             best_acc=test_acc
             is_best='*'
-            if savebest: self.save()
-            saved=ep+1
+            lrs=str(lr1).split(".")[1] # learning rate string
+            saved="model/deepspam-%d-%d-%s-%d.pt"%(t0,batch_size,lrs,ep+1)
+            if savebest: self.save(saved)
         else: is_best=' '
 
         self.log("%3d:  loss=%6.4f acc=%6.4f  val: %6.4f / %6.4f / %6.4f %s (%5.2f+%4.2f sec) lr:%10.8f  HAM:%6.2f/%5.3f%% (%4.1f)  SPAM:%6.2f/%5.3f%% (%4.1f) "%
