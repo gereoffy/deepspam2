@@ -17,8 +17,6 @@ import traceback
 
 from io import BytesIO
 
-# import ppymilterbase
-
 ############################################################################################################################################
 
 from eml2str import eml2str
@@ -98,7 +96,7 @@ milterinfo={
 
 
 thread_cnt=0
-thread_id=987000000
+thread_id=1000000000
 
 async def handle_milter(reader, writer):
 
@@ -109,13 +107,12 @@ async def handle_milter(reader, writer):
     thread_cnt+=1
     t0=time.time()
 
+    history=[]
     eml=[]
 
     addr = writer.get_extra_info('peername')
     addrs=str(addr[0])+":"+str(addr[1])
     print('%d[%3d]  %22s  Connect'%(myid,thread_cnt, addrs) )
-
-#    milter_dispatcher = ppymilterbase.PpyMilterDispatcher(MyHandler,context=addrs)
 
     while True:
       try:
@@ -126,83 +123,57 @@ async def handle_milter(reader, writer):
         data = await reader.readexactly(packetlen)
         cmd=data[:1]
         if cmd==b'D': continue # ignore macros
+        history.append(cmd)
 
-        print(myid,"#data(%d)={%s}"%(len(data),milterinfo.get(cmd,"???")),data[:64])
-
-# 987000205 #data(13)={Option negotation} b'O\x00\x00\x00\x03\x00\x00\x01\xff\x00\x00\x01\x7f'
-# 987000205 #resp(13)={Option negotation} b'O\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00'
+#        print(myid,"#data(%d)={%s}"%(len(data),milterinfo.get(cmd,"???")),data[:64])
 
         if cmd==b'Q': # 'Q'     SMFIC_QUIT      Quit milter communication
             break     #                         Expected response:  Close milter connection
 
         if cmd==b'A': # 'A'     SMFIC_ABORT     Abort current filter checks   Expected response:  NONE
-            eml=[] # reset
+            eml=[] # reset                      Resets internal state of milter program to before SMFIC_HELO
             continue
 
-        response=None
-
-#        if cmd==b'D': # 'D'     SMFIC_MACRO     Define macros                 Expected response:  NONE
+        # https://github.com/phalaaxx/milter/blob/master/milter-protocol.txt
+        response=[b'c'] if cmd in b'BCEHLMNR' else []  # Expected response:  Accept/reject action
 
         if cmd==b'O': # 'O'     SMFIC_OPTNEG    Option negotiation             Expected response:  SMFIC_OPTNEG packet
-            response=b'O\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00' #    version=2  actions=1  proto=0
+            response=[b'O\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00'] #    version=2  actions=1  proto=0
 
-        if cmd==b'C': # 'C'     SMFIC_CONNECT   SMTP connection information
-            response=b'c'
-        if cmd==b'H': # 'H'     SMFIC_HELO      HELO/EHLO name
-#            print("__helo:",data[1:].split(b'\x00'))
-            response=b'c'
-
-        if cmd==b'M': # 'M'     SMFIC_MAIL      MAIL FROM: information
-#            print("__from:",data[1:].split(b'\x00'))
-            response=b'c'
-        if cmd==b'R': # 'R'     SMFIC_RCPT      RCPT TO: information
-#            print("__rcpt:",data[1:].split(b'\x00'))
-            response=b'c'
-
+        # capture headers:
         if cmd==b'L': # 'L'     SMFIC_HEADER    Mail header
-#            print("__hdr:",data[1:].split(b'\x00'))
             hdr=data[1:].split(b'\x00')
             eml.append(hdr[0]+b': '+hdr[1]+b'\n')
-            response=b'c'
         if cmd==b'N': # 'N'     SMFIC_EOH       End of headers marker
             eml.append(b'\n')
-            response=b'c'
 
+        # capture body:
         if cmd==b'B': # 'B'     SMFIC_BODY      Body chunk
             eml.append(data[1:]) # Up to MILTER_CHUNK_SIZE (65535) bytes
-            response=b'c'
         if cmd==b'E': # 'E'     SMFIC_BODYEOB   End of body marker
             # response=[b'a',b'c'] # Expected response:  Zero or more modification actions, then accept/reject action
             # 'h' SMFIR_ADDHEADER Add header (modification action)
-            # FIXME?  'a'       SMFIR_ACCEPT    Accept message completely (accept/reject action)
+            # 'a' SMFIR_ACCEPT    Accept message completely (accept/reject action)
             ret=do_eml(b''.join(eml),addrs)
             response=[b'hX-deepspam\x00'+ret+b'\x00',b'a']
-            eml=[] # restart
+            eml=[] # reset
 
-#        response = milter_dispatcher.Dispatch(data)
-        if response:
-          if type(response) != list: response=[response]
-          for r in response:
-            if isinstance(r, str): r=r.encode()
-##            print("# len(response)=",len(r))
+        for r in response:
             writer.write(struct.pack('!I', len(r))+r)
-            print(myid,"#resp(%d)={%s}"%(len(r),milterinfo.get(r[:1],"???")),r[:64])
+            cmd=r[:1]
+            history.append(cmd)
+#            print(myid,"#resp(%d)={%s}"%(len(r),milterinfo.get(cmd,"???")),r[:64])
             await writer.drain()
 
-#      except ppymilterbase.PpyMilterCloseConnection as e:
-#        print("ppymilterbase.PpyMilterCloseConnection!!!")
-#        break # close
       except Exception as ex:
-#        print("Exception!!!",traceback.format_exc())
         print(myid,"Exception!!!",repr(ex))
         break
 
-#    print("# Close the connection")
     writer.close()
     await writer.wait_closed()
 
     t=time.time()-t0
-    print('%d[%3d]  %22s  Done   %6.3fs'%(myid,thread_cnt, addrs, t ))
+    print('%d[%3d]  %22s  Done   %6.3fs  cmds:'%(myid,thread_cnt, addrs, t ),b''.join(history))
     thread_cnt-=1
 
 
