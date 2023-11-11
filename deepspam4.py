@@ -1,14 +1,5 @@
 #! /usr/bin/python3
 
-###
-### DeepSpam milter filter
-###
-### Uj verzio, ami a ppymilter-re epul (pure python milter), ehhez nem kell a libmilter, nem hasznal C kodot, jobb a memoriakezelese ( = nem leakel :))
-### Csak a ppymilterbase.py file szukseges hozza:  https://raw.githubusercontent.com/agaridata/ppymilter/master/lib/ppymilter/ppymilterbase.py
-### Az egesz 1 threadban fut, async modu halozatkezelessel. 64k meretu emailekkel tesztelve kb 40 email/masodperc sebesseget tudott!
-### Valoszinuleg csak python3-al mukodik, bar talan atirhato py2-re is, ha van ra igeny.
-###
-
 import asyncio
 import logging
 import struct
@@ -138,7 +129,7 @@ async def handle_milter(reader, writer):
         response=[b'c'] if cmd in b'BCEHLMNR' else []  # Expected response:  Accept/reject action
 
         if cmd==b'O': # 'O'     SMFIC_OPTNEG    Option negotiation             Expected response:  SMFIC_OPTNEG packet
-            response=[b'O\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00'] #    version=2  actions=1  proto=0
+            response=[b'O\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x0F'] #  version=2  actions=1 (ACTION_ADDHDRS)  proto=0x0F (ignore conn+helo+from+rcpt)
 
         # capture headers:
         if cmd==b'L': # 'L'     SMFIC_HEADER    Mail header
