@@ -38,7 +38,10 @@ output_stream=open("all.out6","wt",encoding="utf-8")
 
 lok=lno=lout=0
 for line in input_stream:
-    line="".join(orosz[ord(c)] if ord(c) in orosz else c for c in line) # pre-fix russian a/e/o... chars
+    if max(line)>=chr(1024): # only ~25% of lines hit this
+        line="".join(orosz.get(ord(c),c) for c in line) # pre-fix russian a/e/o... chars
+        lok+=1
+
     lno+=1
     if (lno%1000)==0: print(lno,lok,lout)
 
@@ -48,7 +51,7 @@ for line in input_stream:
 
     # remove unicode shit (emojis etc)
     line=normalize('NFKC', line) # Compatibility Decomposition,followed by Canonical Composition  https://unicode.org/reports/tr15/#Introduction
-    line2="".join(unimap[c] if c in unimap else " " for c in line) # lowercase & fix unicode shit...
+    line2="".join(unimap.get(c," ") for c in line) # lowercase & fix unicode shit...
     line2=" ".join(line2.strip().split()) # remove extra whitespace
     if len(line2)>=100: output_stream.write(line2+"\n") ; lout+=1
 
