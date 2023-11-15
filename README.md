@@ -14,11 +14,15 @@ Project history:
 9. python's mime email parser found to be sloooow and sometimes broken -> implemented my own
 10. mailer4: integrated deepspam model evaluation, see Screenshot-mailer4-diffmode.png
 11. mailer4: added search, selection, deduplication, tagging features - tested on real data
+12. hyperparameter search implemented (bs/lr), new model eval code to find best training result
+13. re-implemented the milter API from scratch using native asyncio -> deepspam4.py
+14. first stable/public release! (after testing in production for a week)
 
 # Tools included:
 
 - torch_emb.py: direct rewrite of deepspam1's model train code to pytorch
 - torch_spm3.py: new model trainer, uses py class from model/ dir
+- torch_eval.py: model eval & compare
 - maildedup3.py: email deduplication and parsing, from mbox to txt
 - mailer4.py: Python3 version of my old email reader, used primarily for spam-dataset preparation & model eval
 
