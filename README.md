@@ -14,9 +14,11 @@ Project history:
 9. python's mime email parser found to be sloooow and sometimes broken -> implemented my own
 10. mailer4: integrated deepspam model evaluation, see Screenshot-mailer4-diffmode.png
 11. mailer4: added search, selection, deduplication, tagging features - tested on real data
-12. hyperparameter search implemented (bs/lr), new model eval code to find best training result
-13. re-implemented the milter API from scratch using native asyncio -> deepspam4.py
-14. first stable/public release! (after testing in production for a week)
+12. better charmap filtering (charfilter6.py & unicodes6x.map) to remove unicode shit...
+13. XML's embedding replaced by custom multi-language word2vec pretrained vectors & spm6 model
+14. hyperparameter search implemented (bs/lr), new model eval code to find best training result
+15. re-implemented the milter API from scratch using native asyncio -> deepspam4.py
+16. first stable/public release! (after testing in production for a week)
 
 # Tools included:
 
