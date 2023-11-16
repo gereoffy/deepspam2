@@ -1,7 +1,11 @@
-# deepspam2
-DeepSpam milter v2 development
+# DeepSpam milter v2
 
-Project history:
+Neural-network text classifier for SPAM-filtering witten in python3, using Milter API for MTA integration.
+This is a complete rewrite of https://github.com/gereoffy/deepspam1 using PyTorch and SPM tokenizer.
+
+Release contains pre-trained model for detecting Hungarian & English language spam emails.
+
+# Project history:
 
 1. deepspam1 tf2-keras model ported to pytorch
 2. new model using SentencePiece and embedding from pretrained XLM
