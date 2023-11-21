@@ -203,18 +203,43 @@ class DeepSpam:
             100.0*test_spam/test_spamcnt, 100.0*test_fn/test_spamcnt, 100.0*test_spamsum/test_spamcnt )
 
 
+  def plot(self,clear=False):
+    import matplotlib.pyplot as plt
+    plt.ion() # interactive on
+    if clear: plt.clf() # clear fig
+
+    # histogram
+    ww=self.model.l_hid.weight.view(-1)
+    plt.subplot(211)
+    plt.hist(ww.tolist(),512)
+
+    # raw hidden-layer weight
+#        ww=self.model.l_hid.weight
+#        ww=torch.clamp(ww.abs()/ww.std(),max=1.0) # normalize
+#        plt.subplot(211)
+#        plt.imshow(ww.cpu().detach().numpy(), cmap='gray', interpolation='nearest')
+
+    # hidden-layer weight scaled by fc-layer weights
+    ww=self.model.l_hid.weight * self.model.l_fc.weight[0].unsqueeze(dim=1)
+    ww=torch.clamp(ww.abs()/ww.std(),max=1.0) # normalize
+    plt.subplot(212)
+    plt.imshow(ww.cpu().detach().numpy(), cmap='gray', interpolation='nearest')
+#        print(self.model.l_fc.weight[0].tolist())
+
+#    plt.show()
+#    plt.pause(1)
+    fig=plt.gcf() # get current figure
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+
+
   def train(self,texts,label_ids,num_train,epochs=15,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
 
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
 #    self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
     self.log("DATASET: %d train + %d eval = %d total"%(num_train,len(texts)-num_train,len(texts) ))
 
-    import matplotlib.pyplot as plt
-    plt.ion()
-    plt.clf() # clear fig
-#    plt.cla() # clear axis
-#    fig = plt.figure()
-#    plt2 = fig.add_subplot(111)
+    self.plot(clear=True)
 
 #    print(self.tokenized(texts[:2]))
 
@@ -294,15 +319,6 @@ class DeepSpam:
         val_loss,val_acc,test_acc,spam_stat=self.test(texts[num_train:],label_ids[num_train:],loss_fn)
         t2=time.time()
 
-# ---------- PLOT -------------
-#        plot_y.append(t_loss)
-#        plt2.plot(plot_x,plot_y)
-#        plt.show()
-#        plt.draw()
-#        plt.pause(1)
-#        fig.canvas.draw()
-#        fig.canvas.flush_events()
-
         if ep<1: #epochs/5:
             is_best='.' # warmup :)
             best_acc=test_acc
@@ -318,27 +334,16 @@ class DeepSpam:
         ww=self.model.l_hid.weight.view(-1)
         ws=ww.std().item()
         w=ww.tolist()
-#        wneg=[x for x in w if x<=0]
-#        wpos=[x for x in w if x>=0]
-#        wneg=sum(wneg)/len(wneg)
-#        wpos=sum(wpos)/len(wpos)
-#        wmid=[x for x in w if wneg/5<x<wpos/5]
         wmid=[x for x in w if abs(x)<ws*0.1]
 
         self.log("%3d:  loss=%6.4f acc=%6.4f  val: %6.4f / %6.4f / %6.4f %s (%5.2f+%4.2f sec) lr:%10.8f  %s  W:%5.3f|%5.3f"%
             (ep+1, t_loss,t_acc, val_loss,val_acc,test_acc,  is_best, t1-t0, t2-t1, t_lr, spam_stat, ws,len(wmid)/len(w) ) )
 
 #        print(self.model.l_hid.weight.shape,self.model.l_fc.weight.shape) # torch.Size([32, 512]) torch.Size([2, 32])
-#        ww=self.model.l_fc.weight.view(-1).tolist()
-        plt.hist(w,256)
-        plt.show()
-        plt.pause(1)
 
-        if len(wmid)/len(w)>0.25: break # more than 25% of weights near zero...
+        self.plot()
 
-#    plt.plot(plot_x,plot_y,label=str(lr1))
-#    plt.show()
-#    plt.pause(1)
+        if len(wmid)/len(w)>0.5: break # more than 50% of weights near zero...
 
     return saved
 

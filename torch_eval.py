@@ -46,12 +46,14 @@ for fnev in sys.argv[1:] if len(sys.argv)>1 else glob.glob('model/deepspam*.pt')
     w=ww.tolist()
     wmid=[x for x in w if abs(x)<ws*0.1]
     draw_hist(w,-5*ws,5*ws)
+    ds.plot(clear=True)
 
     a=0;n=0
     ok=bad=0
     for text in open("Junk.txt","rt"):
         a+=(res:=ds(text.split("|",1))) ; n+=1
-        if len(sys.argv)==2: print("%6.3f%%"%res,text[:128])
+        #if len(sys.argv)==2:
+        print("%6.3f%%"%res,text[:128],file=sys.stderr)
         if res>80: ok+=1
         elif res<20: bad+=1
 #    if len(sys.argv)>2:  print("%d/%d  avg: %5.3f  [%s]"%(bad,ok,a/n,fnev)); continue
