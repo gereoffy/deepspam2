@@ -13,7 +13,7 @@ data = None
 def draw_bitmap(w):
     chrmap=" ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█"    # 0=.. 1=*. 2=.* 3=**
     print(len(w),len(w[0]),w[0][0]) # 32 512 0.756577730178833
-    def get(x,y): return 0 if w[y][x]<0.3 else 1
+    def get(x,y): return 0 if w[y][x]<0.1 else 1
     for y in range(0,len(w),2):
         s=""
         for x in range(0,min(len(w[0]),256),2): s+=chrmap[ get(x,y) + get(x+1,y)*2 + get(x,y+1)*4 + get(x+1,y+1)*8 ]
@@ -63,15 +63,19 @@ for fnev in sys.argv[1:] if len(sys.argv)>1 else glob.glob('model/deepspam*.pt')
     draw_hist(w,-5*ws,5*ws)
 
     ww=ds.model.l_hid.weight * ds.model.l_fc.weight[0].unsqueeze(dim=1)
-    ww=ww.abs()/ww.std()
-    draw_bitmap(ww.tolist())
+    ww=(ww.abs()/ww.std()).tolist()
+    wzero=sum( (max(row)<0.1) for row in ww)
+#    draw_bitmap(ww)
 
     a=0;n=0
     ok=bad=0
     for text in open("Junk.txt","rt"):
         a+=(res:=ds(text.split("|",1))) ; n+=1
         #if len(sys.argv)==2:
-        print("%6.3f%%"%res,text[:128],file=sys.stderr)
+        color=0
+        if res<=20: color=92 if res<=2 else 32  # HAM
+        if res>=80: color=91 if res>=98 else 93 # SPAM
+        print("\x1b[%dm%6.3f%%"%(color,res),text[:128],"\x1b[0m",file=sys.stderr)
         if res>80: ok+=1
         elif res<20: bad+=1
 #    if len(sys.argv)>2:  print("%d/%d  avg: %5.3f  [%s]"%(bad,ok,a/n,fnev)); continue
@@ -81,7 +85,7 @@ for fnev in sys.argv[1:] if len(sys.argv)>1 else glob.glob('model/deepspam*.pt')
     t0=time.time()
     val_loss,val_acc,test_acc,spam_stat=ds.test(data,labels)
     t=time.time()-t0
-    print("%5.3f\t%5.3f\t(%d/%d)\t%s [%s]  %4.2fs    %5.3f|%5.3f"%(test_acc,a/n, bad,ok, spam_stat,  fnev, t, ws,len(wmid)/len(w) ))
+    print("%5.3f\t%5.3f\t(%d/%d)\t%s [%s]  %4.2fs    %5.3f|%5.3f|%d"%(test_acc,a/n, bad,ok, spam_stat,  fnev, t, ws,len(wmid)/len(w),wzero ))
 
 #    time.sleep(10)
     
