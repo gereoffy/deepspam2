@@ -51,6 +51,7 @@ charset_mapping = {
     'csibm866':            'ibm866',
     'csisolatin2':         'iso-8859-2',
     'iso-ir-101':          'iso-8859-2',
+    'iso-88-2':            'iso-8859-2',
     'iso8859-2':           'iso-8859-2',
     'iso88592':            'iso-8859-2',
     'iso_8859-2':          'iso-8859-2',
@@ -965,7 +966,8 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     disp=ct[b'_cd'].decode("us-ascii",errors="ignore").lower() if b'_cd' in ct else None
 #    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
     cset=ct[b'charset'].decode("us-ascii",errors="ignore").lower() if b'charset' in ct else None
-    name=hdrdecode4(ct[b'filename']) if b'filename' in ct else hdrdecode4(ct[b'name']) if b'name' in ct else None
+    try: name=hdrdecode4(ct[b'filename']) if b'filename' in ct else hdrdecode4(ct[b'name']) if b'name' in ct else None
+    except: name=None # hdrdecode4 my fail for wrong codepage
     eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
 
 #    if b'name' in ct: print("FNAME:",hdrdecode4(ct[b'name']))
@@ -1104,7 +1106,7 @@ def hdrdecode4(h):
             cenc=parts.pop(0)
 #            print((cset,cfmt,cenc))
             try:
-                if cfmt=='q': cdec=a2b_qp(cenc, header=True)
+                if cfmt=='q': cdec=a2b_qp(cenc.replace("==","="), header=True) # lehets=C3==A9ges
                 else: cdec=a2b_base64(cenc+"===")
                 # EVIL workaround: some utf8 strings are splitted in the middle of an utf8 character...
                 if strips and strips[-1][1]==cset: #    try to concatenate these parts before decoding!
@@ -1135,10 +1137,12 @@ if __name__ == "__main__":
 #    print(t)
     import sys
 
-    s="[K:Spam] =??Q?Szuks=C3=A9ges_teendo_:_=C3=9Aj=C3=ADtsa_meg_Fi=C3=B3kj=C3=A1t__11/1?=  =??Q?6/2020_04:53:26_am?="
+#    s="[K:Spam] =??Q?Szuks=C3=A9ges_teendo_:_=C3=9Aj=C3=ADtsa_meg_Fi=C3=B3kj=C3=A1t__11/1?=  =??Q?6/2020_04:53:26_am?="
 #    s="=?UTF-8?B?W0U6c3BhbV0g?= [K:Spam]Viagra new generation. And it’s great"
 #    s="=?UTF-8?B?LURlciBkZXV0c2NoZSBC/HJnZXIgZ2FueiBlaW5mYWNoIHZvbiB6dUhhdXNlIGF1cyA3LjM4MCwxMCB2ZXJkaWVuZW4ga2Fubg?="
 #    s='=?utf-8?B?RmVsc3rDs2zDrXTDoXMgYmVzesOhbW9sw7MgbWVna8O8bGTD?= =?utf-8?B?qXPDqXJl?='
+#    s='=?UTF-8?Q?Fwd: Sz=C3=A1ll=C3=ADt=C3=A1si visszaigazol=C3=A1sra =C3=A9s lehets=C3==A9ges opci=C3=B3kra v=C3=A1rva?='
+    s='[K:Spam]Re: =?iso-8859-1?Q?=801=2C900=2C000.00?='
     parts = hdr_re.split(s)
     print(parts)
     print(hdrdecode3(s))
