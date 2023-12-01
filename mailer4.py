@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 #from cdifflib import CSequenceMatcher as SequenceMatcher
 
 from hdrdecode import parse_from,hdrdecode3,decodeline
-from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag
+from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,readfolder
 from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
@@ -43,57 +43,6 @@ def do_eml(eml,endpos):
 #    eml['subject'] = hdrdecode(eml.get('subject','').strip())
     eml['from'] = parse_from(eml.get('from','<>'))
     mails_meta.append(eml)
-
-
-def readfolder(f):
-  eml=None
-  in_hdr=0
-  fpos=f.tell()
-  for rawline in f:
-
-    if in_hdr:
-        fpos+=len(rawline)
-
-        line=rawline.rstrip(b'\r\n')
-        if len(line)==0:
-            in_hdr=0
-            eml["_hsize"]=fpos-eml["_fpos"]
-        elif line[0] in [9,32]:
-            hdr+=line
-            continue
-
-        if hdr:
-            try:
-                hdrname,hdrbody = hdr.split(b':',1)
-                hdrname=hdrname.lower()
-                if hdrname in [b'from',b'subject',b'x-deepspam',b'x-grey-ng']: # csak ezek kellenek
-                    eml[hdrname.decode("us-ascii")]=decodeline(hdrbody)
-            except:
-                print("INVALID:",hdr,"\n   EXC:", traceback.format_exc() )
-
-        hdr=line
-        continue
-
-    # in body:
-    if rawline[0:5]==b'From ':
-        if eml: do_eml(eml,fpos)
-        in_hdr=1
-        hdr=b''
-        eml={"_fpos":fpos,"_from":decodeline(rawline.rstrip(b'\r\n'))}
-
-    elif not eml: # and (rawline[:10]==b'X-Grey-ng:' or rawline[:9]==b'Received:'):
-        in_hdr=1
-        hdr=rawline.rstrip(b'\r\n')
-        eml={"_fpos":fpos}
-
-    elif rawline.startswith(b'Content-Disposition: attachment'):
-        eml['_attach']=decodeline(rawline.rstrip(b'\r\n'))  # fixme multiline/parsing...
-#        print(eml['_attach'])
-
-    fpos+=len(rawline)
-
-  if eml: do_eml(eml,fpos)
-  print(fpos,eml)
 
 def get_subject(yy):
     s=mails_meta[yy]["subject"]
@@ -169,7 +118,7 @@ except:
     mboxf.seek(0)
 
 num_mails=len(mails_meta)
-readfolder(mboxf)
+readfolder(mboxf,do_eml)
 if len(mails_meta)>num_mails:
     print("NUM changed %d -> %d"%(num_mails,len(mails_meta)))
     num_mails=len(mails_meta)

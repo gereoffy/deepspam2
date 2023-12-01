@@ -1034,6 +1034,61 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     return eml
 
 
+def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
+  eml=None
+  in_hdr=0
+  fpos=f.tell()
+  for rawline in f:
+
+    if in_hdr:
+        fpos+=len(rawline)
+
+        line=rawline.rstrip(b'\r\n')
+        if len(line)==0:
+            in_hdr=0
+            eml["_hsize"]=fpos-eml["_fpos"]
+        elif line[0] in [9,32]:
+            hdr+=line
+            continue
+
+        if hdr:
+            try:
+                hdrname,hdrbody = hdr.split(b':',1)
+                hdrname=hdrname.decode("us-ascii").lower()
+                if hdrname in keephdrs: # csak ezek kellenek
+                    eml[hdrname]=hdrbody.decode("utf-8", 'mixed')
+            except Exception as e:
+                print("INVALID:",hdr,"\n   EXC:", repr(e))
+
+        hdr=line
+        continue
+
+    # in body:
+    if rawline[0:5]==b'From ':
+        if eml: do_eml(eml,fpos)
+        in_hdr=1
+        hdr=b''
+        eml={"_fpos":fpos,"_from":rawline.rstrip(b'\r\n').decode("us-ascii", errors="ignore")}
+
+    elif not eml: # and (rawline[:10]==b'X-Grey-ng:' or rawline[:9]==b'Received:'):
+        in_hdr=1
+        hdr=rawline.rstrip(b'\r\n')
+        eml={"_fpos":fpos}
+
+    elif rawline.startswith(b'Content-Disposition: attachment'):
+        eml['_attach']=True
+
+    fpos+=len(rawline)
+
+  if eml: do_eml(eml,fpos)
+  return fpos # folder file size
+
+
+
+
+
+
+
 if __name__ == "__main__":
 #    print(s)
 #    print(xmldecode(s))
