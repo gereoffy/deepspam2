@@ -9,7 +9,6 @@ import email.policy
 from email.header import decode_header#,make_header
 
 from binascii import a2b_qp,a2b_base64
-import base64
 
 from html import unescape  #  https://docs.python.org/3/library/html.html
 #from html.entities import name2codepoint
@@ -831,14 +830,18 @@ def vocab_split(preview):
 
 def hdrdecode3(h):     # python 3.x
 #    h=h.decode("raw-unicode-escape")
-    h=h.decode("utf-8",errors="backslashreplace")
+    if type(h)!=str: h=h.decode("utf-8",errors="backslashreplace")
     s=""
     for b,c in decode_header(h):
+#        print(b,repr(c))
         if isinstance(b, str): # not encoded
             s+=b
             continue
         try:
-            s+=b.decode(c or "raw-unicode-escape",errors="backslashreplace")
+            if c==None: c="raw-unicode-escape"
+#            s+=b.decode(c or "raw-unicode-escape",errors="backslashreplace")
+#            s+=b.decode(c or "utf-8",errors="backslashreplace")
+            s+=b.decode(c or "utf-8", 'mixed')
         except:
             s+=b.decode("latin1",errors="ignore") # fallback
 #    if s!=h: print("DecHdr3:",s,h)
@@ -1043,12 +1046,12 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
     if in_hdr:
         fpos+=len(rawline)
 
-        line=rawline.rstrip(b'\r\n')
-        if len(line)==0:
+        line=rawline.rstrip(b'\r\n') # The chars argument is a string specifying the set of characters to be removed. 
+        if len(line)==0: # empty line -> end of the header
             in_hdr=0
             eml["_hsize"]=fpos-eml["_fpos"]
-        elif line[0] in [9,32]:
-            hdr+=line
+        elif line[0] in [9,32]: # starts with tab/space -> header continuation
+            hdr+=line # keep whitespace?
             continue
 
         if hdr:
@@ -1056,7 +1059,7 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
                 hdrname,hdrbody = hdr.split(b':',1)
                 hdrname=hdrname.decode("us-ascii").lower()
                 if hdrname in keephdrs: # csak ezek kellenek
-                    eml[hdrname]=hdrbody.decode("utf-8", 'mixed')
+                    eml[hdrname]=hdrbody.lstrip().decode("utf-8", 'mixed')
             except Exception as e:
                 print("INVALID:",hdr,"\n   EXC:", repr(e))
 
@@ -1089,6 +1092,47 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
 
 
 
+
+
+
+
+
+# Match encoded-word strings in the form =?charset?q?Hello_World?=
+ecre = re.compile(r'''
+  =\?                   # literal =?
+  (?P<charset>[^?]*?)   # non-greedy up to the next ? is the charset
+  \?                    # literal ?
+  (?P<encoding>[qQbB])  # either a "q" or a "b", case insensitive
+  \?                    # literal ?
+  (?P<encoded>.*?)      # non-greedy up to the next ?= is the encoded string
+  \?=                   # literal ?=
+  ''', re.VERBOSE | re.MULTILINE)
+
+def hdrdecode4(h):
+    parts = ecre.split(h)
+#    print(type(parts),parts)
+    strips=[]
+    while parts:
+        textpart=parts.pop(0)
+        if textpart and not textpart.isspace(): strips.append([textpart,None]) # ignore spaces between encoded parts!
+        if parts:
+            cset=parts.pop(0).lower()
+            cfmt=parts.pop(0).lower() # csak q es b lehet!
+            cenc=parts.pop(0)
+#            print((cset,cfmt,cenc))
+            try:
+                if cfmt=='q': cdec=a2b_qp(cenc, header=True)
+                else: cdec=a2b_base64(cenc+"===")
+                # EVIL workaround: some utf8 strings are splitted in the middle of an utf8 character...
+                if strips and strips[-1][1]==cset: #    try to concatenate these parts before decoding!
+                    strips[-1][0]+=cdec
+                else:
+                    strips.append([cdec,cset])
+            except Exception as e:
+                print(repr(e),cfmt,repr(cenc))
+    return "".join(x[0] if x[1]==None else x[0].decode(x[1] or "utf-8","mixed") for x in strips)
+
+
 if __name__ == "__main__":
 #    print(s)
 #    print(xmldecode(s))
@@ -1108,8 +1152,53 @@ if __name__ == "__main__":
 #    print(t)
     import sys
 
+#    s="[K:Spam] =??Q?Szuks=C3=A9ges_teendo_:_=C3=9Aj=C3=ADtsa_meg_Fi=C3=B3kj=C3=A1t__11/1?=  =??Q?6/2020_04:53:26_am?="
+#    s="=?UTF-8?B?W0U6c3BhbV0g?= [K:Spam]Viagra new generation. And it’s great"
+    s="=?UTF-8?B?LURlciBkZXV0c2NoZSBC/HJnZXIgZ2FueiBlaW5mYWNoIHZvbiB6dUhhdXNlIGF1cyA3LjM4MCwxMCB2ZXJkaWVuZW4ga2Fubg?="
+#    s='=?utf-8?B?RmVsc3rDs2zDrXTDoXMgYmVzesOhbW9sw7MgbWVna8O8bGTD?= =?utf-8?B?qXPDqXJl?='
+    parts = ecre.split(s)
+    print(parts)
+    print(hdrdecode3(s))
+    print(hdrdecode4(s))
+    exit(0)
+
+    fnev=sys.argv[1] if len(sys.argv)>1 else "/home/learn2023/SPAM/2021/2021.uniq"
+
+    def xxx(eml,fpos):
+
+        # reference:  python email lib's header parser:
+        with open(fnev,"rb") as f: f.seek(eml["_fpos"]) ; data=f.read(fpos-eml["_fpos"])
+        msg = email.message_from_bytes(data, policy=email.policy.default)
+        s0=msg['subject']
+#        print(eml.get('subject',None))
+#        return
+
+        # my hdr parser:
+        try: h=eml["subject"]
+        except: return
+        s0=s0.strip()
+        s1=hdrdecode3(h).strip()
+        s2=hdrdecode4(h).strip()
+
+        if s0!=s1 or s0!=s2:
+            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+            print(repr(h))
+            print(s0)
+            print(s1)
+            print(s2)
+
+    readfolder(open(fnev,"rb"),xxx,"subject")
+    exit(0)
+
+
+    #s=" =?UTF-8?B?W0U6c3BhbV0g?=\n\tHow are you" # [' ', 'UTF-8', 'B', 'W0U6c3BhbV0g', '\n\tHow are you']
+    s=" [K:Spam]\n =?windows-1250?Q?..._szeretn=E9,_hogy_t=F6bb-SZ=C1ZEZREN_olvass?=\r\n	=?windows-1250?Q?=E1k_aj=E1nlat=E1t?=" # [' [K:Spam]\n ', 'windows-1250', 'Q', '..._szeretn=E9,_hogy_t=F6bb-SZ=C1ZEZREN_olvass', '\r\n\t', 'windows-1250', 'Q', '=E1k_aj=E1nlat=E1t', '']
+#    s=" Hi\n Joe"
+    parts = ecre.split(s)
+    print(parts)
+
 #    print(is_utf8(x))
-#    exit(0)
+    exit(0)
 
 #    t=open("sample.ics","rb").read()
 #    x=parse_ics(t)
