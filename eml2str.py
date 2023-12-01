@@ -666,7 +666,7 @@ def eml2str(msg,ds2=False):
     for h in msg["headers"]:
       try:
         hh=h.split(b':',1)
-        if hh[0].lower()==b'subject': subject=remove_spamtag(hdrdecode3(hh[1]))
+        if hh[0].lower()==b'subject': subject=remove_spamtag(hdrdecode4(hh[1]))
       except: pass
 
   def walk(eml):
@@ -965,11 +965,11 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     disp=ct[b'_cd'].decode("us-ascii",errors="ignore").lower() if b'_cd' in ct else None
 #    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
     cset=ct[b'charset'].decode("us-ascii",errors="ignore").lower() if b'charset' in ct else None
-    name=hdrdecode3(ct[b'filename']) if b'filename' in ct else hdrdecode3(ct[b'name']) if b'name' in ct else None
+    name=hdrdecode4(ct[b'filename']) if b'filename' in ct else hdrdecode4(ct[b'name']) if b'name' in ct else None
     eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
 
-#    if b'name' in ct: print("FNAME:",hdrdecode3(ct[b'name']))
-#    if b'filename' in ct: print("FNAME:",hdrdecode3(ct[b'filename']))
+#    if b'name' in ct: print("FNAME:",hdrdecode4(ct[b'name']))
+#    if b'filename' in ct: print("FNAME:",hdrdecode4(ct[b'filename']))
 
 #  27140 MULTI: b'multipart/alternative'
 #   1388 MULTI: b'multipart/mixed'
@@ -1089,27 +1089,10 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
 
 
 
-
-
-
-
-
-
-
-
-# Match encoded-word strings in the form =?charset?q?Hello_World?=
-ecre = re.compile(r'''
-  =\?                   # literal =?
-  (?P<charset>[^?]*?)   # non-greedy up to the next ? is the charset
-  \?                    # literal ?
-  (?P<encoding>[qQbB])  # either a "q" or a "b", case insensitive
-  \?                    # literal ?
-  (?P<encoded>.*?)      # non-greedy up to the next ?= is the encoded string
-  \?=                   # literal ?=
-  ''', re.VERBOSE | re.MULTILINE)
+hdr_re=re.compile(r'=\?([^?]*?)\?([qQbB])\?(.*?)\?=') # non-greedy matching   =? ... ? [bBqQ] ? ... ?=
 
 def hdrdecode4(h):
-    parts = ecre.split(h)
+    parts = hdr_re.split(h)
 #    print(type(parts),parts)
     strips=[]
     while parts:
@@ -1130,7 +1113,7 @@ def hdrdecode4(h):
                     strips.append([cdec,cset])
             except Exception as e:
                 print(repr(e),cfmt,repr(cenc))
-    return "".join(x[0] if x[1]==None else x[0].decode(x[1] or "utf-8","mixed") for x in strips)
+    return "".join(x[0] if x[1]==None else x[0].decode(charset_mapping.get(x[1],x[1]) or "utf-8","mixed") for x in strips)
 
 
 if __name__ == "__main__":
@@ -1152,15 +1135,15 @@ if __name__ == "__main__":
 #    print(t)
     import sys
 
-#    s="[K:Spam] =??Q?Szuks=C3=A9ges_teendo_:_=C3=9Aj=C3=ADtsa_meg_Fi=C3=B3kj=C3=A1t__11/1?=  =??Q?6/2020_04:53:26_am?="
+    s="[K:Spam] =??Q?Szuks=C3=A9ges_teendo_:_=C3=9Aj=C3=ADtsa_meg_Fi=C3=B3kj=C3=A1t__11/1?=  =??Q?6/2020_04:53:26_am?="
 #    s="=?UTF-8?B?W0U6c3BhbV0g?= [K:Spam]Viagra new generation. And it’s great"
-    s="=?UTF-8?B?LURlciBkZXV0c2NoZSBC/HJnZXIgZ2FueiBlaW5mYWNoIHZvbiB6dUhhdXNlIGF1cyA3LjM4MCwxMCB2ZXJkaWVuZW4ga2Fubg?="
+#    s="=?UTF-8?B?LURlciBkZXV0c2NoZSBC/HJnZXIgZ2FueiBlaW5mYWNoIHZvbiB6dUhhdXNlIGF1cyA3LjM4MCwxMCB2ZXJkaWVuZW4ga2Fubg?="
 #    s='=?utf-8?B?RmVsc3rDs2zDrXTDoXMgYmVzesOhbW9sw7MgbWVna8O8bGTD?= =?utf-8?B?qXPDqXJl?='
-    parts = ecre.split(s)
+    parts = hdr_re.split(s)
     print(parts)
     print(hdrdecode3(s))
     print(hdrdecode4(s))
-    exit(0)
+#    exit(0)
 
     fnev=sys.argv[1] if len(sys.argv)>1 else "/home/learn2023/SPAM/2021/2021.uniq"
 
