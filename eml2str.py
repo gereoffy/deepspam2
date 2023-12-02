@@ -4,17 +4,9 @@ import codecs
 import re
 import zipfile
 
-import email
-import email.policy
-from email.header import decode_header#,make_header
-
 from binascii import a2b_qp,a2b_base64
 
 from html import unescape  #  https://docs.python.org/3/library/html.html
-#from html.entities import name2codepoint
-
-#import html5lib # for testing
-# from bs4 import BeautifulSoup
 
 try:
   from striprtf import rtf_to_text
@@ -285,31 +277,6 @@ def mixed_decoder(unicode_error):
 codecs.register_error("mixed", mixed_decoder)
 
 
-#HTML_RE = re.compile(r'&([^;]+);')
-#def html_unescape(mystring):
-#  return HTML_RE.sub(lambda m: chr(name2codepoint.get(m.group(1),63)), mystring)
-
-def replaceEntities(s):
-    x = s.group(0)
-    s = s.group(1)
-#    print(s) #  '#43'
-    if s[0] == "#":
-        if s[1] in ['x','X']:
-            c = int(s[2:], 16)
-        else:
-            c = int(s[1:])
-        if 0xD800 <= c <= 0xDFFF or c > 0x10FFFF:
-            return '\uFFFD'
-        if c>=128: # ekezetes karakter, nem irasjel
-            return chr(c)
-    return x # beken hagyjuk
-
-#    r_unescape = re.compile(r"&(#?[xX]?(?:[0-9a-fA-F]+|\w{1,8}));") # ez erre is matchel:   &nbsp;
-r_unescape = re.compile(r"&(#[xX]?[0-9a-fA-F]+);") # de nekunk csak az ekezetes betu unikodok kellenek!
-def xmldecode(data):
-  return r_unescape.sub(replaceEntities, data)
-
-
 #  <meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
 #  <meta content="utf-8" name="charset"/>
 #  <meta charset="utf-8"/>
@@ -357,10 +324,7 @@ def tag_type(tag):
     return 1,name
 
 
-fileno=1000
-
 def html2text(data,debug=False):
-  global fileno
   warning=''
   indent=0
   
@@ -469,44 +433,13 @@ def html2text(data,debug=False):
     text+=[txt]
     tlen+=len(txt.strip())
 
-#  if warning: text=("!!! "+warning+" !!!").encode()+text
-#  if debug and warning: print(warning)
   if debug and warning: html+=[b' <!> |' + warning.encode("utf-8",errors="ignore")]  # beirjuk a sorok koze inkabb!
-#  if warning:
-#     open("debug_%d.html"%(fileno),"wb").write(data+b'\n\n========================================\n'+warning.encode("utf-8"))
-#     fileno+=1
 
   text=b''.join(text)
   text=b' '.join(text.split())  # remove redundant spaces
   text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
   if debug: return text, html
   return text
-
-
-def html2text5(data):
-  in_style=0
-  in_script=0
-  in_title=0
-  text=""
-  dom = html5lib.parse(data,namespaceHTMLElements=False)
-  walker = html5lib.treewalkers.getTreeWalker("etree")
-  for i in walker(dom):
-    t=i["type"]
-# {'type': 'StartTag', 'name': 'p', 'namespace': None, 'data': OrderedDict([((None, 'style'), "font-size: 14px; line-height: 1.2; text-align: justify; word-break: break-word; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; mso-line-height-alt: 17px; margin: 0;")])}
-    if t=="StartTag" and i["name"]=="style": in_style+=1
-    if t=="EndTag" and i["name"]=="style": in_style-=1
-    if t=="StartTag" and i["name"]=="script": in_script+=1
-    if t=="EndTag" and i["name"]=="script": in_script-=1
-    if t=="StartTag" and i["name"]=="title": in_title+=1
-    if t=="EndTag" and i["name"]=="title": in_title-=1
-    if in_style<=0 and in_script<=0 and in_title<=0:
-      if (t=="StartTag" or t=="EmptyTag") and i["name"] in ["p","br","tr"]: text+="<BR>"
-      elif (t=="StartTag" or t=="EndTag") and not i["name"] in ["span","a","b","i","u","em","strong","abbr"]: text+=" "
-      if t=="Characters" or t=="SpaceCharacters": text+=i["data"]
-  text=' '.join(text.split())  # remove redundant spaces
-  return '\n'.join([ t.strip() for t in text.split('<BR>') ])
-
-
 
 
 def parse_ics(data):
@@ -577,14 +510,8 @@ def is_utf8(s):
 #    print(ok,bad)
     return ok>4*bad # ha bad==0 akkor ok==1 is eleg!
 
-#    l=len(s)
-#    n=sum(c>=192 for c in s) # n# of utf8 characters
-#    m=sum(c>=128 for c in s) # n# of utf8 bytes
-#    return n>=5 and m>=2*n
-
 
 def decode_payload(data,ctyp="text/html",charset=None):
-    data5=None
 
     ldata=data.lower()
     if ctyp=="text/calendar" or ctyp=="application/ics":
@@ -595,10 +522,6 @@ def decode_payload(data,ctyp="text/html",charset=None):
     elif ctyp=="application/ms-tnef":
 #        print("###### Parse TNEF ######")
         tnefobj = TNEF(data)
-#        print(tnefobj)
-#        print(tnefobj.__dict__)
-#        print(tnefobj.codepage)
-#        print(tnefobj.htmlbody)
         if tnefobj.htmlbody:
 #            charset=tnefobj.codepage or "utf-8"
             charset="utf-8"
@@ -608,8 +531,6 @@ def decode_payload(data,ctyp="text/html",charset=None):
 #         elif tnef_support>1 and tnefobj.rtfbody:
 #            data=rtf_to_text(tnefobj.rtfbody.decode(tnefcp,"ignore"))
     elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata or b'</br>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
-#        origdata=str(charset).encode()+b'\n'+data
-#        data5=html2text5(data)        # html5lib version
         p=ldata.find(b'<body')
         if p>0: charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
         if charset and (charset.startswith("iso-2022") or charset.startswith("csiso2022")):  # https://en.wikipedia.org/wiki/ISO/IEC_2022
@@ -642,21 +563,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     else:
         data=unescape(data)  # fix &gt; etc
 
-    # nbsp->space, remove SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
-#    data=data.replace('\u00A0',' ').replace('\u00AD','')
-    data=''.join([invalid_charrefs.get(ord(c),c) for c in data])
-
-    if data5:  # compare with html5lib version, and save raw+outputs for debugging if mismatch...
-      data2=" ".join(data.split())
-      data5=" ".join(data5.split())
-      if data2!=data5:
-        global fileno
-        print(len(data),len(data5),"!!!!!!!")
-        open("debug_%d.html"%(fileno),"wb").write(origdata)
-        open("debug_%d.txt1"%(fileno),"wt").write(data2)
-        open("debug_%d.txt2"%(fileno),"wt").write(data5)
-        fileno+=1
-    return data
+    return ''.join([invalid_charrefs.get(ord(c),c) for c in data])
 
 
 def eml2str(msg,ds2=False):
@@ -691,66 +598,39 @@ def eml2str(msg,ds2=False):
   return (subject,text) if subject else text
 
 
-def eml2str_old(msg):
-  if isinstance(msg, io.IOBase):
-    msg = email.message_from_binary_file(msg)
-  elif type(msg)==bytes:
-    msg = email.message_from_bytes(msg)
-  text=""
-  #pp = msg.get_payload()
-  for p in msg.walk():
-#    print p.get_content_type()
-    charset=p.get_content_charset("utf-8")
-    ctyp=p.get_content_type().lower()
-    fnev=str(p.get_filename())
-    disp=p.get_content_disposition()
-    print((ctyp,charset,disp,fnev))
-    if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support):
-#      try:
-        data=p.get_payload(decode=True)
-        data=decode_payload(data,ctyp,charset)
-        if not text or len(data)>20: text=data
-        if ctyp=="text/html" and len(text)>200: break
-#        if len(data)>len(text): text=data
-#        print(text)
-#      except:
-#        print(traceback.format_exc())
-  return text
-
-
 def get_mimedata(eml):
     mimeinfo=["RAW message: %d bytes"%(len(eml))]
     mimedata=[eml]
-    msg = email.message_from_bytes(eml, policy=email.policy.default)
+    msg=parse_eml(eml,decode=True)
     def walker(msg,level=0):
 #        print(" "*(level*3), msg.is_multipart(), msg.get_content_type(), msg.get_content_charset(), msg.is_attachment(), msg.get_filename())
 #        s=" "*(level*3) + "Multi:"+str(msg.is_multipart())+"  "+str(msg.get_content_type())
-        ctyp=msg.get_content_type()
-        cset=msg.get_content_charset()
+        ctyp=msg["ctyp"]
+        cset=msg["charset"]
         s=" "*(level*3) + str(ctyp) # + str(msg.is_multipart())
         if cset: s+="["+str(cset)+"]"
-        raw=msg.as_bytes()
+        #raw=msg.as_bytes()
+        raw=msg["raw"] # tupple of start-end position
+        raw=eml[raw[0]:raw[1]]
         s+=" (%d) "%(len(raw))
-        pay=msg.get_payload(decode=True)
+        pay=msg.get("payload",None)
         html=None
         if pay:
             s+="%d"%(len(pay))
             if ctyp.startswith("text/") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support) or ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                html=decode_payload(pay,ctyp,cset) # ez meg a soup-prettify elott kell, mert az elbassza a whitespacet...
+                html=decode_payload(pay,ctyp,cset) # ez meg a prettify elott kell, mert az elbassza a whitespacet...
                 if ctyp=="text/html" or ctyp=="text/xml":
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
-#                    soup=BeautifulSoup(pay,"html5lib", from_encoding=cset)
-#                    pay=soup.prettify(encoding="utf-8")
                     dtext,dhtml=html2text(pay,debug=True)  # html prettify :)
                     pay=b''.join(dhtml)
         mimeinfo.append(s)
 
         # Attachment file:
-        if msg.get_filename():
+        if msg["name"]:
             mimedata.append(raw)
             s=" "*(level*3+3)
-            s+="Attach: " if msg.is_attachment() else "Inline: "
-            s+=msg.get_filename()
+            if msg["disp"]: s+=msg["disp"]+": "  # "Attach: " if msg.is_attachment() else "Inline: "
+            s+=msg["name"]
             mimeinfo.append(s)
         mimedata.append(pay if pay else raw)
 
@@ -763,8 +643,8 @@ def get_mimedata(eml):
 
 #        for subpart in msg.iter_parts():  # policy=email.policy.default
 #            walker(subpart,level+1)
-        if msg.is_multipart():
-            for subpart in msg.get_payload():  # az iter_parts() bugos, csak multipartra jo, message/rfc-re NEM!!!
+        if msg["parts"]: #        msg.is_multipart():
+            for subpart in msg["parts"]: #msg.get_payload():  # az iter_parts() bugos, csak multipartra jo, message/rfc-re NEM!!!
                 walker(subpart,level+1)
 
 #        if msg.is_multipart():
@@ -828,27 +708,6 @@ def vocab_split(preview):
 
 
 
-
-def hdrdecode3(h):     # python 3.x
-#    h=h.decode("raw-unicode-escape")
-    if type(h)!=str: h=h.decode("utf-8",errors="backslashreplace")
-    s=""
-    for b,c in decode_header(h):
-#        print(b,repr(c))
-        if isinstance(b, str): # not encoded
-            s+=b
-            continue
-        try:
-            if c==None: c="raw-unicode-escape"
-#            s+=b.decode(c or "raw-unicode-escape",errors="backslashreplace")
-#            s+=b.decode(c or "utf-8",errors="backslashreplace")
-            s+=b.decode(c or "utf-8", 'mixed')
-        except:
-            s+=b.decode("latin1",errors="ignore") # fallback
-#    if s!=h: print("DecHdr3:",s,h)
-    return s
-
-
 # parses "Content-*: value; option2=value2" type headers to dict
 def parse_ctyp(data,hdr=b'_',ct=None):
     if ct==None: ct={}
@@ -884,25 +743,6 @@ def parse_ctyp(data,hdr=b'_',ct=None):
         elif name or c>32: name.append(c)
     if name: ct[bytes(name).lower()]=bytes(value).rstrip()
     return ct
-
-
-# reference implementation using email library... only for testing!
-def parse_eml_ref(data,debug=False,decode=False,level=0):
-    def walker(msg,level=0):
-#        print(" "*(level*3), msg.is_multipart(), msg.get_content_type(), msg.get_content_charset(), msg.is_attachment(), msg.get_filename())
-#        s=" "*(level*3) + "Multi:"+str(msg.is_multipart())+"  "+str(msg.get_content_type())
-        ctyp=msg.get_content_type()
-#        cset=msg.get_content_charset()
-        raw=msg.as_bytes()
-        eml={ "ctyp":ctyp, "parts":[], "raw":raw, "size":len(raw) }
-        if msg.is_multipart():
-            for subpart in msg.get_payload():  # az iter_parts() bugos, csak multipartra jo, message/rfc-re NEM!!!
-                eml["parts"].append(walker(subpart,level+1))
-        else:
-            if decode: eml["payload"]=msg.get_payload(decode=True)
-        return eml
-    msg = email.message_from_bytes(data, policy=email.policy.default)
-    return walker(msg)
 
 
 #   4562 Encoding: b'7bit'
@@ -967,7 +807,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
 #    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
     cset=ct[b'charset'].decode("us-ascii",errors="ignore").lower() if b'charset' in ct else None
     try: name=hdrdecode4(ct[b'filename']) if b'filename' in ct else hdrdecode4(ct[b'name']) if b'name' in ct else None
-    except: name=None # hdrdecode4 my fail for wrong codepage
+    except: name="EXC!" # hdrdecode4 my fail for wrong codepage
     eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
 
 #    if b'name' in ct: print("FNAME:",hdrdecode4(ct[b'name']))
@@ -1094,6 +934,7 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
 hdr_re=re.compile(r'=\?([^?]*?)\?([qQbB])\?(.*?)\?=') # non-greedy matching   =? ... ? [bBqQ] ? ... ?=
 
 def hdrdecode4(h):
+    if type(h)!=str: h=h.decode("utf-8","mixed") # handle bytes input
     parts = hdr_re.split(h)
 #    print(type(parts),parts)
     strips=[]
@@ -1116,130 +957,6 @@ def hdrdecode4(h):
             except Exception as e:
                 print(repr(e),cfmt,repr(cenc))
     return "".join(x[0] if x[1]==None else x[0].decode(charset_mapping.get(x[1],x[1]) or "utf-8","mixed") for x in strips)
-
-
-if __name__ == "__main__":
-#    print(s)
-#    print(xmldecode(s))
-#    print(html_unescape(s))
-    
-#    print(eml2str(open("test.eml","rb").read()))
-#    print(get_mimedata(open("test.eml","rb").read())[0])
-
-#    msg = email.message_from_bytes(open("test.eml","rb").read(), policy=email.policy.default)
-#    print(type(msg))
-#    help(msg)
-
-#    print(parse_htmlhead(b'  <meta charset="utf-8"/>'))
-#    print(parse_htmlhead(b'<meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>'))
-#    t=b'<p>Hello<em>World</em>!!! em</p>'
-#    t=b'<p>Hello<i>World</em>!!! em</p>'
-#    print(t)
-    import sys
-
-#    s="[K:Spam] =??Q?Szuks=C3=A9ges_teendo_:_=C3=9Aj=C3=ADtsa_meg_Fi=C3=B3kj=C3=A1t__11/1?=  =??Q?6/2020_04:53:26_am?="
-#    s="=?UTF-8?B?W0U6c3BhbV0g?= [K:Spam]Viagra new generation. And it’s great"
-#    s="=?UTF-8?B?LURlciBkZXV0c2NoZSBC/HJnZXIgZ2FueiBlaW5mYWNoIHZvbiB6dUhhdXNlIGF1cyA3LjM4MCwxMCB2ZXJkaWVuZW4ga2Fubg?="
-#    s='=?utf-8?B?RmVsc3rDs2zDrXTDoXMgYmVzesOhbW9sw7MgbWVna8O8bGTD?= =?utf-8?B?qXPDqXJl?='
-#    s='=?UTF-8?Q?Fwd: Sz=C3=A1ll=C3=ADt=C3=A1si visszaigazol=C3=A1sra =C3=A9s lehets=C3==A9ges opci=C3=B3kra v=C3=A1rva?='
-    s='[K:Spam]Re: =?iso-8859-1?Q?=801=2C900=2C000.00?='
-    parts = hdr_re.split(s)
-    print(parts)
-    print(hdrdecode3(s))
-    print(hdrdecode4(s))
-#    exit(0)
-
-    fnev=sys.argv[1] if len(sys.argv)>1 else "/home/learn2023/SPAM/2021/2021.uniq"
-
-    def xxx(eml,fpos):
-
-        # reference:  python email lib's header parser:
-        with open(fnev,"rb") as f: f.seek(eml["_fpos"]) ; data=f.read(fpos-eml["_fpos"])
-        msg = email.message_from_bytes(data, policy=email.policy.default)
-        s0=msg['subject']
-#        print(eml.get('subject',None))
-#        return
-
-        # my hdr parser:
-        try: h=eml["subject"]
-        except: return
-        s0=s0.strip()
-        s1=hdrdecode3(h).strip()
-        s2=hdrdecode4(h).strip()
-
-        if s0!=s1 or s0!=s2:
-            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-            print(repr(h))
-            print(s0)
-            print(s1)
-            print(s2)
-
-    readfolder(open(fnev,"rb"),xxx,"subject")
-    exit(0)
-
-
-    #s=" =?UTF-8?B?W0U6c3BhbV0g?=\n\tHow are you" # [' ', 'UTF-8', 'B', 'W0U6c3BhbV0g', '\n\tHow are you']
-    s=" [K:Spam]\n =?windows-1250?Q?..._szeretn=E9,_hogy_t=F6bb-SZ=C1ZEZREN_olvass?=\r\n	=?windows-1250?Q?=E1k_aj=E1nlat=E1t?=" # [' [K:Spam]\n ', 'windows-1250', 'Q', '..._szeretn=E9,_hogy_t=F6bb-SZ=C1ZEZREN_olvass', '\r\n\t', 'windows-1250', 'Q', '=E1k_aj=E1nlat=E1t', '']
-#    s=" Hi\n Joe"
-    parts = ecre.split(s)
-    print(parts)
-
-#    print(is_utf8(x))
-    exit(0)
-
-#    t=open("sample.ics","rb").read()
-#    x=parse_ics(t)
-#    print(x.decode())
-
-#    t=open(sys.argv[1],"rb").read()
-#    t=open("ALL.html","rb").read()
-    
-    t=open("tnefhtml.eml","rb").read()
-    print(eml2str(t))
-    print(eml2str_old(t))
-    
-#    eml=parse_eml_ref(t,debug=False)
-
-    def walk(eml):
-        yield eml
-        if eml["parts"]:
-            for p in eml["parts"]: yield from walk(p)
-#        else: yield eml
-
-    eml=parse_eml(t,debug=False,decode=True)
-#    print(eml)
-#    eml=parse_eml(t,debug=True,decode=True)
-    for e in walk(eml): print(e["raw"], e["size"],len(e.get("payload",b'')),e["ctyp"],e["disp"],e["name"])
-
-
-    print("--- reference: ---")
-    eml=parse_eml_ref(t,debug=False,decode=True)
-    for e in walk(eml): print(e["size"],len(e.get("payload",b'')),e["ctyp"])
-    
-#    print(decode_payload(t,ctyp="text/html",charset=None))
-#    decode_payload(t,ctyp="text/html",charset=None)
-
-#    import time
-#    t0=time.time()
-
-#    t1=html2text(t)
-#    t1,h1=html2text(t,debug=True)
-#    h1=b''.join(h1)
-
-#    t0=time.time()-t0
-#    print("%8.5f ms"%(t0*1000.0),len(t),len(t1))
-#    print("%8.5f ms"%(t0*1000.0),len(t),len(t1),len(h1))
-
-#    open("ALL.out","wb").write(h1)
-    
-    
-#    t2=html2text5(t)
-#    print(len(t1),len(t2))
-#    open(sys.argv[1]+".txt1","wb").write(t1)
-#    open(sys.argv[1]+".txt2","wt").write(t2)
-    
-#    print(t1)
-#    print(t2)
 
 
     
