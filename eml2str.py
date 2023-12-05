@@ -959,4 +959,26 @@ def hdrdecode4(h):
     return "".join(x[0] if x[1]==None else x[0].decode(charset_mapping.get(x[1],x[1]) or "utf-8","mixed") for x in strips)
 
 
+from_re1=re.compile(r'^(?:(\"((?:\\.|[^\"])*?)\"\s*)|(.*?))\s*<([^>]*?)>$') # ("val\" ami"|vala mi) <emailcim>   -> \2|\3 <\4>
+from_re2=re.compile(r'^(.*?)([^<>\")\s]*@[-.a-zA-Z0-9]*)\s*(\(.*\))?') # \1 emailcim (\3)   -> \3|\1 <\2>
+
+# split From: header to Address and Name part (does not decode)
+def parse_from(h):
+    m=from_re1.match(h)
+    if m:  # match!   new style:  name <address>
+        return m.group(4),(m.group(2) or m.group(3) or "")
+    m=from_re2.match(h)
+    if m:  # match!   old style:  address (name)
+        return m.group(2),(m.group(3) or m.group(1) or "")
+#    print("BADdress:",h)
+    return "",h  # no address found...
+
+# split From: header to Address and Name part (and decode it)
+def parse_from2(h):
+    a,n=parse_from(h.strip())
+    n=hdrdecode4(n)
+    if not a and '@' in n: a,n=parse_from(n.strip()) # workaround(=ugly hack) for base64-encoded email addresses...
+#   print("%50s | %s"%(a,n))
+    return a,n
+
     

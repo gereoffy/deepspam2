@@ -10,8 +10,8 @@ import traceback
 from difflib import SequenceMatcher
 #from cdifflib import CSequenceMatcher as SequenceMatcher
 
-from hdrdecode import parse_from,hdrdecode3,decodeline
-from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,readfolder
+#from hdrdecode import parse_from
+from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,readfolder,hdrdecode4,parse_from2
 from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
@@ -39,9 +39,9 @@ mails_dedup=[]
 def do_eml(eml,endpos):
     eml["_size"]=endpos-eml["_fpos"]
 #    eml['subject'] = hdrdecode(cleanupspaces(eml.get('subject',b'')))
-    eml['subject'] = hdrdecode3( " ".join(eml.get('subject','').split()) )
+    eml['subject'] = hdrdecode4( " ".join(eml.get('subject','').split()) )
 #    eml['subject'] = hdrdecode(eml.get('subject','').strip())
-    eml['from'] = parse_from(eml.get('from','<>'))
+    eml['from'] = parse_from2(eml.get('from','<>'))
     mails_meta.append(eml)
 
 def get_subject(yy):
