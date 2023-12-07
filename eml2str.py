@@ -676,9 +676,10 @@ STAG_SA = re.compile(r'\*\*\*\*\*SPAM[{(][0-9][.0-9]*[)}]\*\*\**')
 
 def remove_spamtag(text):
     text=STAG_SA.sub("", text) # Spamassassin
-    text=text.replace("*****SPAM*****","").replace("[SPAM]","").replace("[Spam]","")
+    text=text.replace("*****SPAM*****","").replace("[SPAM]","").replace("[Spam]","") # External
     text=text.replace("[SpaM]","").replace("[E:spam]","").replace("[E:infected]","") # ESETS
     text=text.replace("[K:Spam]","").replace("[K:Phishing]","").replace("[K:Virus]","").replace("[K:Mass]","") # Kaspersky
+    text=text.replace("[Outlook levélszemét-bejelentő]","").replace("[Outlook junk mail report]","") # Outlook
     return text
 
 def vocab_split(preview):
@@ -745,14 +746,7 @@ def parse_ctyp(data,hdr=b'_',ct=None):
     return ct
 
 
-#   4562 Encoding: b'7bit'
-#  20094 Encoding: b'8bit'
-#  15149 Encoding: b'base64'
-#  47887 Encoding: b'quoted-printable'
-#     74 Encoding: b'binary' Ez a main headerben van, de minek?
-#      2 Encoding: b'hexa'   ???  base64-nek nez ki pedig.
-#    376 Encoding: b'utf-8'  WTF?  ez nincs enkodolva
-
+# https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
 def decode_body(data,encoding):
     try:
         if encoding=='base64': return a2b_base64(data)
@@ -761,7 +755,7 @@ def decode_body(data,encoding):
     except Exception as e:
         print("PayloadDecodingExc:",repr(e))
 #    if not encoding in ['7bit','8bit','binary','utf-8']: print("UnknownEncoding:",encoding)
-    if encoding and not encoding in ['7bit','8bit']: print("UnknownEncoding:",encoding)
+    if encoding and not encoding in ['7bit','8bit','binary']: print("UnknownEncoding:",encoding) # The values "8bit", "7bit", and "binary" all imply that NO encoding
     return data
 
 
@@ -974,7 +968,7 @@ def parse_from(h):
     return "",h  # no address found...
 
 # split From: header to Address and Name part (and decode it)
-def parse_from2(h):
+def decode_from(h):
     a,n=parse_from(h.strip())
     n=hdrdecode4(n)
     if not a and '@' in n: a,n=parse_from(n.strip()) # workaround(=ugly hack) for base64-encoded email addresses...

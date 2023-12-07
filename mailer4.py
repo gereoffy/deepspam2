@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 #from cdifflib import CSequenceMatcher as SequenceMatcher
 
 #from hdrdecode import parse_from
-from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,readfolder,hdrdecode4,parse_from2
+from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,readfolder,hdrdecode4,decode_from
 from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
@@ -39,15 +39,16 @@ mails_dedup=[]
 def do_eml(eml,endpos):
     eml["_size"]=endpos-eml["_fpos"]
 #    eml['subject'] = hdrdecode(cleanupspaces(eml.get('subject',b'')))
-    eml['subject'] = hdrdecode4( " ".join(eml.get('subject','').split()) )
-#    eml['subject'] = hdrdecode(eml.get('subject','').strip())
-    eml['from'] = parse_from2(eml.get('from','<>'))
+#    eml['subject'] = hdrdecode4( " ".join(eml.get('subject','').split()) )
+    eml['subject'] = hdrdecode4(eml.get('subject',''))
+    eml['from'] = decode_from(eml.get('from','<>'))
     mails_meta.append(eml)
 
-def get_subject(yy):
+def get_subject(yy,remove=True):
     s=mails_meta[yy]["subject"]
-    s=remove_spamtag(s)
-    s=s.replace("|","/")
+    if remove:
+        s=remove_spamtag(s)
+        s=s.replace("|","/")
     s=ucsremove(s) # remove unicode shit
     s=" ".join(s.split()) # fix whitespace
     return s
@@ -202,6 +203,7 @@ filter_extra=0
 filter_list=0
 mode_from=2
 mode_preview=0
+mode_spamtag=False
 
 yy=num_mails-1
 y0=0
@@ -265,7 +267,7 @@ def check_match(y):
         if 'f' in m or 'F' in m:
             fr=mails_meta[y]["from"]
             fr=fr[1]+"  <"+fr[0]+">" if mode_from>1 else fr[mode_from]
-            if m=='F': fr=fr.lower()
+            if 'F' in m: fr=fr.lower()
             if v in fr: return True
         # Preview:
         if 'p' in m:
@@ -324,7 +326,7 @@ def drawline(pos,sel=False):
         '*' if fl & MAILFLAG_EXTRA else ' ',
         -term_w1, wcfixstr(fr)[xx:xx+term_w1],           # "from" shifted/trimmed
         term_w1, s, '+' if "_attach" in m else ' ',      # bodysize, attachment flag
-        -term_w2, wcfixstr(m["subject"])[xx:xx+term_w2], # "subject" shifted/trimmed
+        -term_w2, wcfixstr(get_subject(pos,mode_spamtag))[xx:xx+term_w2], # "subject" shifted/trimmed
         eol ))
 
 #    if(yy==y){ set_color(7); g_y=i+2; } else set_color(0);
@@ -483,6 +485,9 @@ while True:
         except:
             pass
 
+    # toggle spamtag removal
+    if ch=='T':
+        mode_spamtag=not mode_spamtag
 
     # preview mode/generation:
     if ch=='p':
@@ -529,7 +534,6 @@ while True:
                 if filter_selected==1: mails_flag[i]&=(~MAILFLAG_SELECTED) | ret
                 else: mails_flag[i]|=ret
 
-
     if ch in ['d','t','[']:
         tagged=[]
         i=-1
@@ -547,7 +551,8 @@ while True:
                     for i in tagged: f.write("%s:%d:%s|%s\n"%(fnev,i,get_subject(i),get_preview(i)))
         if ch=='[':
             sel=box_input(t1="Filename to export %d emails?"%(len(tagged)))
-            with open(sel,"wb") as f:
+            if sel:
+              with open(sel,"wb") as f:
                 for i in tagged:
                     mboxf.seek(mails_meta[i]["_fpos"])
                     f.write(mboxf.read(mails_meta[i]["_size"]))
