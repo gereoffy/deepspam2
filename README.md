@@ -23,6 +23,7 @@ Release contains pre-trained model for detecting Hungarian & English language sp
 14. hyperparameter search implemented (bs/lr), new model eval code to find best training result
 15. re-implemented the milter API from scratch using native asyncio -> deepspam4.py
 16. first stable/public release! (after testing in production for a week)
+17. visualization (asciiart/matplotlib) of the model weights (trainging & testing processes)
 
 # Tools included:
 
@@ -34,8 +35,7 @@ Release contains pre-trained model for detecting Hungarian & English language sp
 
 # Libraries included:
 
-- eml2str.py: my mime email parser and html2txt converter functions
-- hdrdecode.py: my email header parser functions, from the pymavis/spamwall project
+- eml2str.py: all of my mime email parser and html2txt converter functions
 - ttykeymap.py: python version of my old getch2.c, console i/o functions and text UI
 - widechars.py: wide unicode utilities, based on https://github.com/jquast/wcwidth
 - striprtf.py: rtf to txt converter, from https://github.com/joshy/striprtf
