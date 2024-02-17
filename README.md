@@ -24,6 +24,7 @@ Release contains pre-trained model for detecting Hungarian & English language sp
 15. re-implemented the milter API from scratch using native asyncio -> deepspam4.py
 16. first stable/public release! (after testing in production for a week)
 17. visualization (asciiart/matplotlib) of the model weights (trainging & testing processes)
+18. email parser: refactor/rewrite hdrdecode & parse_from functions of old hdrdecode.py
 
 # Tools included:
 
