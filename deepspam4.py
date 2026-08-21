@@ -15,25 +15,33 @@ from eml2str import eml2str
 from model import DeepSpam
 ds=DeepSpam()
 
+res_cache={}
 
 def do_eml(msg,addr):
     t=time.time()
     text=eml2str(msg,True) # extract subject,bodytext
-    tokens=ds.tokenized([text])[0]
-    print(tokens[:160])
-    res=ds(text)
-    t=time.time()-t
-    print("---  %22s  result: %8.5f  (%5.3f ms)"%(addr,res,1000*t))
+    try:
+        res=res_cache[text]
+        t=time.time()-t
+    except:
+        tokens=ds.tokenized([text])[0]
+        print(tokens[:160])
+        res=ds(text)
+        res_cache[text]=res
+        t=time.time()-t
+        try:
+            f=open("deepspam2.res","at")
+            f.write("%3d%%: %s\n"%(res,tokens))
+            f.close()
+        except:
+            pass
+
+    print("---  %22s  result: %8.5f  (%5.3f ms)  {%d}"%(addr,res,1000*t,len(res_cache)))
     if res<0: return b"toosmall"
     res+=0.1
+
 #    print(res)
 #    print("%d%%"%(res))
-    try:
-        f=open("deepspam2.res","at")
-        f.write("%3d%%: %s\n"%(res,tokens))
-        f.close()
-    except:
-        pass
     if res<2:
         return b"ham %d%%"%(res)
     if res<10:
