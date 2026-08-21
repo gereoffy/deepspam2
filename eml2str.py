@@ -469,7 +469,7 @@ def parse_ics(data):
 
 
 def parse_docx(data):   # if ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document" or fnev.endswith(".docx"):
-#    try:
+    try:
         zipf=zipfile.ZipFile(io.BytesIO(data))
         xml=zipf.read('word/document.xml') #.decode("utf-8")
         s=b''
@@ -484,7 +484,8 @@ def parse_docx(data):   # if ctyp=="application/vnd.openxmlformats-officedocumen
             elif tag1 in [b'w:tab',b'w:br',b'w:cr',b'w:p']:
                 s+=b'\n'
         return s
-
+    except Exception as e:
+        return repr(e).encode()
 
 def is_utf8(s):
 #    s=[c for c in s if c>=128] # only non-ascii bytes
