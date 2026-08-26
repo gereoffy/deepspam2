@@ -277,6 +277,36 @@ def mixed_decoder(unicode_error):
 codecs.register_error("mixed", mixed_decoder)
 
 
+
+# Mely tag-ek mely attributumaban keressuk az URL-t.
+# Bovitheto pl. 'meta' + 'content' (refresh redirect), 'srcset' stb. igeny szerint.
+LINK_ATTRS = {
+    'a':      'href',
+    'area':   'href',
+    'base':   'href',
+    'link':   'href',
+    'img':    'src',
+    'iframe': 'src',
+    'frame':  'src',
+    'form':   'action',
+}
+
+ATTR_RE_CACHE = {}
+
+# Kiszedi egy attributum erteket egy RAW (eredeti case-u!) tag-bol.
+def html_extract_attr(rawtag, attrname):
+    if attrname not in ATTR_RE_CACHE:
+        # (?<![\w-]) -> ne talaljon pl. "xhref"-et vagy "data-href"-et
+        ATTR_RE_CACHE[attrname] = re.compile(
+            rb'(?<![\w-])' + attrname.encode('ascii') +
+            rb'\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+            re.IGNORECASE)
+    m=ATTR_RE_CACHE[attrname].search(rawtag)
+    if not m: return None
+    val = m.group(1) or m.group(2) or m.group(3) or b''
+    return val  # unescape(val.decode("utf-8","mixed")).strip()  FIXME
+
+
 #  <meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
 #  <meta content="utf-8" name="charset"/>
 #  <meta charset="utf-8"/>
@@ -327,6 +357,7 @@ def tag_type(tag):
 def html2text(data,debug=False):
   warning=''
   indent=0
+  urls=[]
   
   p=data.find(b'<')
   if p<0: # not html!?
@@ -368,10 +399,16 @@ def html2text(data,debug=False):
       if c==61: eqsn=True #  =
       if c==62: break     #  >
     # 
-    tag=data[p+1:q-1].lower() # tag without < >
+    rawtag=data[p+1:q-1] # tag without < >
+    tag=rawtag.lower()
     tt,ttag=tag_type(tag)     # tag type,name
     in_block= tt>0 and ttag in ['style','script','title','svg','annotation']   # TODO FIXME: svg kell ide?
 #    print("TAG:",p,q,tt,ttag,tag) # debug
+
+    # UJ: URL kinyerese nyito/selfclosing tagekbol (zaro tag-nek nincs attributuma)
+    if tt>=0 and ttag in LINK_ATTRS:
+        url=html_extract_attr(rawtag, LINK_ATTRS[ttag])
+        if url: urls.append(url)
 
     if debug:
       if tt<0: indent-=1
@@ -438,6 +475,10 @@ def html2text(data,debug=False):
   text=b''.join(text)
   text=b' '.join(text.split())  # remove redundant spaces
   text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
+
+  urls=list(dict.fromkeys(urls))  # sorrend-megorzo dedup az URL listan
+  for url in urls: text+=b'\nURL: '+url
+
   if debug: return text, html
   return text
 
