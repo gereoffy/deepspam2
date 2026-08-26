@@ -285,7 +285,7 @@ LINK_ATTRS = {
     'area':   'href',
     'base':   'href',
     'link':   'href',
-    'img':    'src',
+#    'img':    'src',
     'iframe': 'src',
     'frame':  'src',
     'form':   'action',
@@ -304,7 +304,7 @@ def html_extract_attr(rawtag, attrname):
     m=ATTR_RE_CACHE[attrname].search(rawtag)
     if not m: return None
     val = m.group(1) or m.group(2) or m.group(3) or b''
-    return val  # unescape(val.decode("utf-8","mixed")).strip()  FIXME
+    return unescape(val.decode("utf-8","mixed")).strip()
 
 
 #  <meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
@@ -405,7 +405,7 @@ def html2text(data,debug=False):
     in_block= tt>0 and ttag in ['style','script','title','svg','annotation']   # TODO FIXME: svg kell ide?
 #    print("TAG:",p,q,tt,ttag,tag) # debug
 
-    # UJ: URL kinyerese nyito/selfclosing tagekbol (zaro tag-nek nincs attributuma)
+    # URL kinyerese nyito/selfclosing tagekbol (zaro tag-nek nincs attributuma)
     if tt>=0 and ttag in LINK_ATTRS:
         url=html_extract_attr(rawtag, LINK_ATTRS[ttag])
         if url: urls.append(url)
@@ -477,7 +477,7 @@ def html2text(data,debug=False):
   text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
 
   urls=list(dict.fromkeys(urls))  # sorrend-megorzo dedup az URL listan
-  for url in urls: text+=b'\nURL: '+url
+  for url in urls: text+=b'\nURL: '+url[:128].encode("utf-8")
 
   if debug: return text, html
   return text
