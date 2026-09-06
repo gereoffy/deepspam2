@@ -14,18 +14,7 @@ try:
 except:
   rtf_support=False
 
-try:
-  from tnefparse import TNEF
-  tnef_support=1  # TNEF/HTML support
-#  if rtf_support:
-#    try:
-#      import compressed_rtf
-#      tnef_support=2  # TNEF/RTF support
-#    except:
-#      pass
-except:
-  tnef_support=0
-
+from tnef_mini import parse_tnef_body
 
 charset_mapping = {
     'cp-850':              'cp850',
@@ -563,15 +552,11 @@ def decode_payload(data,ctyp="text/html",charset=None):
         charset="utf-8"
     elif ctyp=="application/ms-tnef":
 #        print("###### Parse TNEF ######")
-        tnefobj = TNEF(data)
-        if tnefobj.htmlbody:
-#            charset=tnefobj.codepage or "utf-8"
-            charset="utf-8"
-            data=html2text(tnefobj.htmlbody.encode(charset))
-        else:
-            data=b''
-#         elif tnef_support>1 and tnefobj.rtfbody:
-#            data=rtf_to_text(tnefobj.rtfbody.decode(tnefcp,"ignore"))
+        tnefobj = parse_tnef_body(data) #     out = {'body': None, 'htmlbody': None, 'rtfbody_compressed': None, 'codepage': None}
+        if tnefobj and if tnefobj['htmlbody']:
+            if tnefobj['codepage']: charset=tnefobj['codepage']
+            data=html2text(tnefobj['htmlbody'])
+#        if tnefobj and if tnefobj['rtfbody_compressed']: data=rtf_to_text(decompress_rtf(tnefobj[rtfbody]+b'\x00').decode(tnefcp,"ignore"))
     elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata or b'</br>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
         p=ldata.find(b'<body')
         if p>0: charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
