@@ -20,12 +20,6 @@ try:
 except:
   tnef_support=False
 
-try:
-  from compressed_rtf import decompress as decompress_rtf
-  rtf_decompress_support=True
-except:
-  rtf_decompress_support=False
-
 charset_mapping = {
     'cp-850':              'cp850',
     '_iso-2022-jp$esc':    'iso-2022-jp',
@@ -566,10 +560,9 @@ def decode_payload(data,ctyp="text/html",charset=None):
         if tnefobj and tnefobj['htmlbody']:
             if tnefobj['codepage']: charset=tnefobj['codepage']
             data=html2text(tnefobj['htmlbody'])
-        elif tnefobj and tnefobj['rtfbody_compressed'] and rtf_decompress_support and rtf_support:
+        elif tnefobj and tnefobj['rtfbody'] and rtf_support:
             try:
-                rtf_raw=decompress_rtf(tnefobj['rtfbody_compressed']+b'\x00')
-                rtf_text=rtf_raw.decode(tnefobj['codepage'] or "cp1252","ignore")
+                rtf_text=tnefobj['rtfbody'].decode(tnefobj['codepage'] or "cp1252","ignore")
                 data=rtf_to_text(rtf_text).encode("utf-8")
                 charset="utf-8"
             except Exception:

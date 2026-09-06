@@ -9,14 +9,20 @@ Alapja (reverse-engineered a forrasbol, nem szo szerinti masolat):
 A MAPI property-tipusok mérete/elrendezese szükséges ahhoz, hogy a nem
 érdekes property-ken is helyesen at tudjunk lepni (a stream szekvencialis).
 
+A decompress_rtf() fuggveny a compressed_rtf csomagbol van atemelve (csak a
+dekompresszios resz, a compress() es a CRC-ellenorzes nelkul -- lasd a fuggveny
+sajat docstring-jet):
+  https://github.com/delimitry/compressed_rtf  (MIT License, Copyright (c) 2016 Dmitry Alimov)
+
 Hasznalat:
     body = parse_tnef_body(data)   # data: a winmail.dat / attMAPI_ATTACH_DATA_OBJ nyers bajtjai
     body['htmlbody']            # bytes vagy None
-    body['rtfbody_compressed']  # bytes (LZFu-tomoritett!) vagy None -- dekompresszio kulon (compressed_rtf)
+    body['rtfbody_compressed']  # bytes (LZFu-tomoritett!) vagy None -- decompress_rtf()-fel bonthato ki
     body['body']                # bytes vagy None (plain text body)
     body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None
 """
 import struct
+from io import BytesIO
 
 TNEF_SIGNATURE = 0x223E9F78
 LVL_MESSAGE = 0x01
@@ -190,13 +196,15 @@ def _decode_mapi_props(data, oem_codepage):
 def parse_tnef_body(data):
     """
     data: a teljes TNEF (winmail.dat) nyers tartalma.
-    Visszaad egy dict-et: body, htmlbody (bytes), rtfbody_compressed (mindig bytes, LZFu-tomoritve), codepage (str vagy None),
-    vagy None ha nem TNEF / hibas a signature.
+    Visszaad egy dict-et: body, htmlbody (bytes), rtfbody (mar dekompresszalva,
+    bytes, vagy None ha nem sikerult/nem volt), rtfbody_compressed (a nyers,
+    meg tomoritett valtozat, LZFu -- ritkan kell kozvetlenul), codepage (str vagy
+    None), vagy None ha nem TNEF / hibas a signature.
     """
     if len(data) < 6 or _uint32(data, 0)[0] != TNEF_SIGNATURE:
         return None
 
-    out = {'body': None, 'htmlbody': None, 'rtfbody_compressed': None, 'codepage': None}
+    out = {'body': None, 'htmlbody': None, 'rtfbody_compressed': None, 'rtfbody': None, 'codepage': None}
     oem_codepage = 'cp1252'  # ATTOEMCODEPAGE hianyaban ez a TNEF-default
     offset = 6
     n = len(data)
@@ -223,7 +231,85 @@ def parse_tnef_body(data):
             break  # vedelem vegtelen ciklus ellen hibas/korrupt adat eseten
         offset += obj_total
 
+    if out['rtfbody_compressed']:
+        try:
+            out['rtfbody'] = decompress_rtf(out['rtfbody_compressed'] + b'\x00')
+        except Exception:
+            out['rtfbody'] = None
+    else:
+        out['rtfbody'] = None
+
     return out
+
+
+_RTF_INIT_DICT = (
+    b'{\\rtf1\\ansi\\mac\\deff0\\deftab720{\\fonttbl;}{\\f0\\fnil \\froman \\'
+    b'fswiss \\fmodern \\fscript \\fdecor MS Sans SerifSymbolArialTimes New '
+    b'RomanCourier{\\colortbl\\red0\\green0\\blue0\r\n\\par \\pard\\plain\\'
+    b'f0\\fs20\\b\\i\\u\\tab\\tx'
+)
+_RTF_INIT_DICT_SIZE = 207
+_RTF_MAX_DICT_SIZE = 4096
+_RTF_COMPRESSED = b'LZFu'
+_RTF_UNCOMPRESSED = b'MELA'
+
+
+def decompress_rtf(data):
+    """LZFu-tomoritett RTF kibontasa (a 'rtfbody_compressed' mezore).
+    A compressed_rtf csomagbol atemelve, csak a dekompresszios resz (a compress()
+    es a CRC32-ellenorzes NELKUL -- utobbi szandekosan hianyzik: ha a checksum nem
+    stimmelne, inkabb probaljuk meg kibontani ami kijon belole, mint hogy mindent
+    eldobjunk -- egy hianyos/hibas szoveg is tobbet er a celunkra mint a semmi).
+    Forras: https://github.com/delimitry/compressed_rtf (MIT License)."""
+    init_dict = list(_RTF_INIT_DICT)
+    init_dict += b' ' * (_RTF_MAX_DICT_SIZE - _RTF_INIT_DICT_SIZE)
+    if len(data) < 16:
+        raise Exception('Data must be at least 16 bytes long')
+    write_offset = _RTF_INIT_DICT_SIZE
+    output_buffer = BytesIO()
+    in_stream = BytesIO(data)
+    comp_size = struct.unpack('<I', in_stream.read(4))[0]
+    raw_size = struct.unpack('<I', in_stream.read(4))[0]
+    comp_type = in_stream.read(4)
+    in_stream.read(4)  # crc, szandekosan nem ellenorizzuk (lasd docstring)
+    contents = BytesIO(in_stream.read(comp_size - 12))
+    if comp_type == _RTF_COMPRESSED:
+        end = False
+        while not end:
+            val = contents.read(1)
+            if not val:
+                break
+            control = '{0:08b}'.format(ord(val))
+            for i in range(1, 9):
+                if control[-i] == '1':
+                    val = contents.read(2)
+                    if not val:
+                        break
+                    token = struct.unpack('>H', val)[0]
+                    offset = (token >> 4) & 0b111111111111
+                    length = token & 0b1111
+                    if write_offset == offset:
+                        end = True
+                        break
+                    actual_length = length + 2
+                    for step in range(actual_length):
+                        read_offset = (offset + step) % _RTF_MAX_DICT_SIZE
+                        char = init_dict[read_offset]
+                        output_buffer.write(bytes([char]))
+                        init_dict[write_offset] = char
+                        write_offset = (write_offset + 1) % _RTF_MAX_DICT_SIZE
+                else:
+                    val = contents.read(1)
+                    if not val:
+                        break
+                    output_buffer.write(val)
+                    init_dict[write_offset] = ord(val)
+                    write_offset = (write_offset + 1) % _RTF_MAX_DICT_SIZE
+    elif comp_type == _RTF_UNCOMPRESSED:
+        return contents.read(raw_size)
+    else:
+        raise Exception('Unknown type of RTF compression!')
+    return output_buffer.getvalue()
 
 
 if __name__ == "__main__":
