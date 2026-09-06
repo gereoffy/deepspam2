@@ -14,7 +14,11 @@ try:
 except:
   rtf_support=False
 
-from tnef_mini import parse_tnef_body
+try:
+  from tnef_mini import parse_tnef_body
+  tnef_support=True
+except:
+  tnef_support=False
 
 charset_mapping = {
     'cp-850':              'cp850',
@@ -553,10 +557,10 @@ def decode_payload(data,ctyp="text/html",charset=None):
     elif ctyp=="application/ms-tnef":
 #        print("###### Parse TNEF ######")
         tnefobj = parse_tnef_body(data) #     out = {'body': None, 'htmlbody': None, 'rtfbody_compressed': None, 'codepage': None}
-        if tnefobj and if tnefobj['htmlbody']:
+        if tnefobj and tnefobj['htmlbody']:
             if tnefobj['codepage']: charset=tnefobj['codepage']
             data=html2text(tnefobj['htmlbody'])
-#        if tnefobj and if tnefobj['rtfbody_compressed']: data=rtf_to_text(decompress_rtf(tnefobj[rtfbody]+b'\x00').decode(tnefcp,"ignore"))
+#        if tnefobj and tnefobj['rtfbody_compressed']: data=rtf_to_text(decompress_rtf(tnefobj[rtfbody]+b'\x00').decode(tnefcp,"ignore"))
     elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata or b'</br>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
         p=ldata.find(b'<body')
         if p>0: charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
