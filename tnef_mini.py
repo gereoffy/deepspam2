@@ -159,7 +159,9 @@ def _decode_mapi_props(data, oem_codepage):
                 offset += fixed
         elif attr_type in (SZMAPI_STRING, SZMAPI_UNICODE_STRING, SZMAPI_OBJECT,
                            SZMAPI_BINARY, SZMAPI_UNSPECIFIED):
-            values, offset = _skip_variable(data, offset, bool(num_mv), attr_type, oem_codepage)
+            for _ in range(num_mv or 1):
+                one_vals, offset = _skip_variable(data, offset, bool(num_mv), attr_type, oem_codepage)
+                values.extend(one_vals)
         elif attr_type == SZMAPI_NULL:
             pass
         else:
