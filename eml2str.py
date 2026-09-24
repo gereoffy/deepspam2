@@ -5,6 +5,7 @@ import re
 import zipfile
 
 from binascii import a2b_qp,a2b_base64
+from urllib.parse import unquote_to_bytes
 
 from html import unescape  #  https://docs.python.org/3/library/html.html
 
@@ -774,7 +775,9 @@ def parse_ctyp(data,hdr=b'_',ct=None):
         value=[]
         eqsn=False
       elif eqsn:  #  after the = character -> value
-        if c==34 or c==39: ijel=c   # idezojelek = utan oke
+        # " barhol idezojel, de ' csak az ertek elejen (nem szabvanyos, de elofordul), kulonben
+        # elrontana az O'Brien.pdf es az RFC 2231 filename*=UTF-8''... ertekeket (ott soha nem idezojel)
+        if c==34 or (c==39 and not value and name[-1]!=42): ijel=c
         elif value or c>32: value.append(c)  # skip initial WS
       else:     #  before the = character -> name
         if c==61: eqsn=True #  =
@@ -837,7 +840,9 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     disp=ct[b'_cd'].decode("us-ascii",errors="ignore").lower() if b'_cd' in ct else None
 #    cset=ct.get(b'charset',b'').decode("us-ascii",errors="ignore").lower()
     cset=ct[b'charset'].decode("us-ascii",errors="ignore").lower() if b'charset' in ct else None
-    try: name=hdrdecode4(ct[b'filename']) if b'filename' in ct else hdrdecode4(ct[b'name']) if b'name' in ct else None
+    try:
+        name=ct_param(ct,b'filename')
+        if name is None: name=ct_param(ct,b'name')
     except: name="EXC!" # hdrdecode4 my fail for wrong codepage
     eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
 
@@ -988,6 +993,37 @@ def hdrdecode4(h):
             except Exception as e:
                 print(repr(e),cfmt,repr(cenc))
     return "".join(x[0] if x[1]==None else x[0].decode(charset_mapping.get(x[1],x[1]) or "utf-8","mixed") for x in strips)
+
+
+# RFC 2231 parameter value continuations/encoding:  filename*=UTF-8''sz%C3%A1mla.pdf
+#   filename*0*=UTF-8''hossz%C3%BA; filename*1*=_n%C3%A9v.pdf; filename*2=".pdf"
+param_re=re.compile(rb'^\*(?:(\d+)(\*)?)?$')
+
+def rfc2231_decode(ct,key):
+    parts=[]
+    for k,v in ct.items():
+        if k.startswith(key+b'*'):
+            m=param_re.match(k[len(key):])
+            if m: parts.append((int(m.group(1) or 0), m.group(1) is None or m.group(2) is not None, v))
+    if not parts: return None
+    parts.sort()
+    raw=b''
+    cset='us-ascii'
+    for i,(n,encoded,v) in enumerate(parts):
+        if encoded:
+            if i==0 and v.count(b"'")>=2:
+                cs,lang,v=v.split(b"'",2)
+                cset=cs.decode("us-ascii","ignore").lower() or 'us-ascii'
+            v=unquote_to_bytes(v)
+        raw+=v
+    try: return raw.decode(charset_mapping.get(cset,cset),"mixed")
+    except LookupError: return raw.decode("utf-8","mixed")
+
+# decoded parameter value from parse_ctyp() dict: RFC 2231 (key*=...) preferred, then RFC 2047 (key=...)
+def ct_param(ct,key):
+    v=rfc2231_decode(ct,key)
+    if v is None and key in ct: v=hdrdecode4(ct[key])
+    return v
 
 
 from_re1=re.compile(r'^(?:(\"((?:\\.|[^\"])*?)\"\s*)|(.*?))\s*<([^>]*?)>$') # ("val\" ami"|vala mi) <emailcim>   -> \2|\3 <\4>
