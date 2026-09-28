@@ -2,7 +2,8 @@
 Minimal, allofuggosegmentes TNEF (winmail.dat) body-kinyero.
 Csak azt csinalja amire szuksegunk van: a HTML / RTF(compressed) / plain body
 kinyereset a TNEF attributum-streambol, a MAPI Properties (0x9003) blokkon
-keresztul. Attachment-eket, recipient-tablat, dátumokat stb. NEM dolgoz fel.
+keresztul, valamint az attachment-ek (nev + adat) kibontasat.
+Recipient-tablat, dátumokat stb. NEM dolgoz fel.
 
 Alapja (reverse-engineered a forrasbol, nem szo szerinti masolat):
   https://github.com/koodaamo/tnefparse  (LGPL-3.0)
@@ -16,11 +17,14 @@ sajat docstring-jet):
 
 Hasznalat:
     body = parse_tnef_body(data)   # data: a winmail.dat / attMAPI_ATTACH_DATA_OBJ nyers bajtjai
+    body = parse_tnef_body(data, attachments=True)   # a csatolmanyokat is kibontja
     body['htmlbody']            # bytes vagy None
     body['rtfbody_compressed']  # bytes (LZFu-tomoritett!) vagy None -- decompress_rtf()-fel bonthato ki
     body['body']                # bytes vagy None (plain text body)
     body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None
+    body['attachments']         # [{'name': str vagy None, 'data': bytes}, ...]  (attachments=False eseten ures)
 """
+import re
 import struct
 from io import BytesIO
 
@@ -32,12 +36,22 @@ ATTBODY = 0x800C
 ATTOEMCODEPAGE = 0x9007
 ATTMAPIPROPS = 0x9003
 
+# attachment szintu TNEF attributumok:
+ATTATTACHRENDDATA = 0x9002  # uj attachment kezdete
+ATTATTACHTITLE = 0x8010     # fajlnev (8.3 vagy rovid nev)
+ATTATTACHDATA = 0x800F      # az attachment adata
+ATTATTACHMENT = 0x9005      # az attachment MAPI property-jei
+
 # MAPI property tag-ek amik erdekelnek minket (properties.py-bol, tnefparse):
 MAPI_BODY = 0x1000
 MAPI_RTF_COMPRESSED = 0x1009
 MAPI_BODY_HTML = 0x1013
 MAPI_UNCOMPRESSED_BODY = 0x3FD9
 MAPI_INTERNET_CODEPAGE = 0x3FDE
+MAPI_DISPLAY_NAME = 0x3001
+MAPI_ATTACH_DATA_OBJ = 0x3701     # BINARY, vagy OBJECT (16 byte IID + adat, pl. beagyazott uzenet = TNEF)
+MAPI_ATTACH_FILENAME = 0x3704
+MAPI_ATTACH_LONG_FILENAME = 0x3707
 
 # MAPI property-tipusok (csak a merethez kellenek, hogy helyesen tudjunk lepni):
 SZMAPI_SHORT = 0x0002
@@ -91,13 +105,18 @@ def _fixed_size(attr_type):
 def _skip_variable(data, offset, is_multi, attr_type, oem_codepage):
     # SZMAPI_STRING / UNICODE_STRING / OBJECT / BINARY / UNSPECIFIED
     # visszaadja: (ertekek listaja -- str ha STRING/UNICODE_STRING, egyebkent bytes --, uj offset)
+    # csonka / hibas adat eseten a hibaig beolvasott (az utolsot esetleg csonkan) ertekeket adja vissza
     if is_multi:
         num_vals = 1
     else:
+        if offset + 4 > len(data):
+            return [], len(data)
         num_vals = _uint32(data, offset)[0]
         offset += 4
     vals = []
     for _ in range(num_vals):
+        if offset + 4 > len(data):
+            break
         length = _uint32(data, offset)[0]
         offset += 4
         pad = (-length) % 4
@@ -119,11 +138,13 @@ def _join(values):
     return b"".join(v.rstrip(b'\x00') for v in values)
 
 
-def _decode_mapi_props(data, oem_codepage):
+def _decode_mapi_props(data, oem_codepage, attach=False):
     """vegigmegy a MAPI property-listan, es kigyujti a szamunkra erdekes tageket.
     A visszaadott 'body'/'htmlbody' str, ha a property tipusa STRING/UNICODE_STRING
     volt (ekkor mar dekodolva van), egyebkent nyers bytes (ekkor a hivo fixhetul meg
-    az internet_codepage alapjan, ha van ilyen property is a listaban)."""
+    az internet_codepage alapjan, ha van ilyen property is a listaban).
+    attach=True eseten (attachment MAPI property-k) a 'data' kulcsban az adat (bytes),
+    a MAPI_ATTACH_* / MAPI_DISPLAY_NAME tag-ek kulcsa alatt a nevek vannak."""
     result = {}
     n = len(data)
     if n < 4:
@@ -133,103 +154,224 @@ def _decode_mapi_props(data, oem_codepage):
     for _ in range(num_properties):
         if offset + 4 > n:
             break
-        attr_type = _uint16(data, offset)[0]
-        offset += 2
-        attr_name = _uint16(data, offset)[0]
-        offset += 2
-
-        # named (GUID-hoz kotott) property fejlec atugrasa, ha van:
-        if attr_name >= GUID_EXISTS_FLAG:
-            offset += 16  # guid
-            kind = _uint32(data, offset)[0]
-            offset += 4
-            if kind == 0:
-                offset += 4  # guid_prop (uint32)
-            else:
-                iid_len = _uint32(data, offset)[0]
-                offset += 4
-                pad = (-iid_len) % 4
-                offset += iid_len + pad
-
-        num_mv = None
-        if MULTI_VALUE_FLAG & attr_type:
-            attr_type ^= MULTI_VALUE_FLAG
-            num_mv = _uint32(data, offset)[0]
-            offset += 4
-
-        fixed = _fixed_size(attr_type)
-        values = []
-        if fixed is not None:
-            for _ in range(num_mv or 1):
-                values.append(data[offset:offset + fixed])
-                offset += fixed
-        elif attr_type in (SZMAPI_STRING, SZMAPI_UNICODE_STRING, SZMAPI_OBJECT,
-                           SZMAPI_BINARY, SZMAPI_UNSPECIFIED):
-            for _ in range(num_mv or 1):
-                one_vals, offset = _skip_variable(data, offset, bool(num_mv), attr_type, oem_codepage)
-                values.extend(one_vals)
-        elif attr_type == SZMAPI_NULL:
-            pass
-        else:
-            # ismeretlen tipus -> nem tudunk biztonsagosan tovabblepni, feladjuk
-            return result
-
-        # 2-byte padding parossag miatt (csak SHORT/BOOLEAN eseten, ahogy a tnefparse is csinalja)
-        if (num_mv or 1) % 2 and attr_type in (SZMAPI_SHORT, SZMAPI_BOOLEAN):
-            offset += 2
-
-        if attr_name in (MAPI_BODY, MAPI_UNCOMPRESSED_BODY):
-            result['body'] = _join(values)
-        elif attr_name == MAPI_BODY_HTML:
-            result['htmlbody'] = _join(values)
-        elif attr_name == MAPI_RTF_COMPRESSED:
-            result['rtfbody_compressed'] = b''.join(v.rstrip(b'\x00') for v in values)
-        elif attr_name == MAPI_INTERNET_CODEPAGE and values:
-            try:
-                result['codepage'] = _codepage_name(struct.unpack('<I', values[0][:4])[0])
-            except Exception:
-                pass
-
+        try:
+            offset = _decode_one_prop(data, offset, n, oem_codepage, attach, result)
+        except struct.error:
+            break  # csonka property fejlec: ami eddig megvan, azt visszaadjuk
+        if offset is None:
+            break  # ismeretlen tipus: nem tudunk biztonsagosan tovabblepni
     return result
 
 
-def parse_tnef_body(data):
+def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
+    # egy MAPI property feldolgozasa, visszaadja az uj offsetet (None: nem lehet folytatni)
+    attr_type = _uint16(data, offset)[0]
+    offset += 2
+    attr_name = _uint16(data, offset)[0]
+    offset += 2
+
+    # named (GUID-hoz kotott) property fejlec atugrasa, ha van:
+    if attr_name >= GUID_EXISTS_FLAG:
+        offset += 16  # guid
+        kind = _uint32(data, offset)[0]
+        offset += 4
+        if kind == 0:
+            offset += 4  # guid_prop (uint32)
+        else:
+            iid_len = _uint32(data, offset)[0]
+            offset += 4
+            pad = (-iid_len) % 4
+            offset += iid_len + pad
+
+    num_mv = None
+    if MULTI_VALUE_FLAG & attr_type:
+        attr_type ^= MULTI_VALUE_FLAG
+        num_mv = _uint32(data, offset)[0]
+        offset += 4
+
+    fixed = _fixed_size(attr_type)
+    values = []
+    if fixed is not None:
+        count = num_mv or 1
+        if offset + fixed * count > n:
+            count = max(0, (n - offset) // fixed)  # hibas darabszam: csak ami belefer
+        for _ in range(count):
+            values.append(data[offset:offset + fixed])
+            offset += fixed
+    elif attr_type in (SZMAPI_STRING, SZMAPI_UNICODE_STRING, SZMAPI_OBJECT,
+                       SZMAPI_BINARY, SZMAPI_UNSPECIFIED):
+        for _ in range(num_mv or 1):
+            if offset + 4 > n:
+                break  # hibas darabszam, elfogyott az adat
+            one_vals, offset = _skip_variable(data, offset, bool(num_mv), attr_type, oem_codepage)
+            values.extend(one_vals)
+    elif attr_type == SZMAPI_NULL:
+        pass
+    else:
+        # ismeretlen tipus -> nem tudunk biztonsagosan tovabblepni, feladjuk
+        return None
+
+    # 2-byte padding parossag miatt (csak SHORT/BOOLEAN eseten, ahogy a tnefparse is csinalja)
+    if (num_mv or 1) % 2 and attr_type in (SZMAPI_SHORT, SZMAPI_BOOLEAN):
+        offset += 2
+
+    if attr_type == SZMAPI_OBJECT:
+        values = [v[16:] for v in values]  # az IID levagasa
+
+    if attach:
+        if attr_name == MAPI_ATTACH_DATA_OBJ:
+            result['data'] = b''.join(values)
+        elif attr_name in (MAPI_ATTACH_LONG_FILENAME, MAPI_ATTACH_FILENAME, MAPI_DISPLAY_NAME):
+            result[attr_name] = _join(values)
+    elif attr_name in (MAPI_BODY, MAPI_UNCOMPRESSED_BODY):
+        result['body'] = _join(values)
+    elif attr_name == MAPI_BODY_HTML:
+        result['htmlbody'] = _join(values)
+    elif attr_name == MAPI_RTF_COMPRESSED:
+        result['rtfbody_compressed'] = b''.join(v.rstrip(b'\x00') for v in values)
+    elif attr_name == MAPI_INTERNET_CODEPAGE and values:
+        try:
+            result['codepage'] = _codepage_name(struct.unpack('<I', values[0][:4])[0])
+        except Exception:
+            pass
+
+    return offset
+
+
+# egy TNEF attributum fejlece: level(1) name(2) type(2) length(4), utana az adat es 2 byte checksum.
+# A resync ilyen mintaju fejleceket keres: level 1/2, name 0x00xx/0x80xx/0x90xx, type 0..9
+_HDR_RE = re.compile(rb'[\x01\x02].[\x00\x80\x90][\x00-\x09]\x00', re.S)
+_RESYNC_SMALL = 65536  # ekkora attributum checksumjat akkor is megnezzuk, ha utana nem ertelmes fejlec jon
+
+
+def _plausible_hdr(data, p, n):
+    # ertelmes attributum fejlec kezdodik-e p-nel (a checksumot nem nezi)
+    if p + 11 > n or data[p] not in (LVL_MESSAGE, LVL_ATTACHMENT):
+        return False
+    if _uint16(data, p + 3)[0] > 9 or (data[p + 2] not in (0x00, 0x80, 0x90)):
+        return False
+    return p + 11 + _uint32(data, p + 5)[0] <= n
+
+
+def _checksum_ok(data, p, length):
+    return (sum(memoryview(data)[p + 9:p + 9 + length]) & 0xFFFF) == _uint16(data, p + 9 + length)[0]  # memoryview: nincs masolat
+
+
+def _resync(data, start, n, budget):
+    # a kovetkezo ep (ertelmes fejlecu es jo checksumu) attributum pozicioja start-tol, vagy None.
+    # A checksum szamolas draga, ezert csak akkor nezzuk meg, ha a jelolt utan is ertelmes fejlec
+    # (vagy a file vege) jon, vagy kicsi az attributum. budget: ennyi byte-ot checksumolhatunk meg.
+    for m in _HDR_RE.finditer(data, start):
+        p = m.start()
+        if not _plausible_hdr(data, p, n):
+            continue
+        length = _uint32(data, p + 5)[0]
+        q = p + 11 + length
+        if length > _RESYNC_SMALL and q < n and not _plausible_hdr(data, q, n):
+            continue
+        budget[0] -= length
+        if budget[0] < 0:
+            return None
+        if _checksum_ok(data, p, length):
+            return p
+    return None
+
+
+def parse_tnef_body(data, attachments=False):
     """
     data: a teljes TNEF (winmail.dat) nyers tartalma.
+    attachments: True eseten a csatolmanyokat is kibontja (pl. virusellenorzeshez), egyebkent
+    (szovegbanyaszat) az attachment szintu attributumokat csak atugorja, es az 'attachments' ures lista.
     Visszaad egy dict-et: body, htmlbody (bytes), rtfbody (mar dekompresszalva,
     bytes, vagy None ha nem sikerult/nem volt), rtfbody_compressed (a nyers,
     meg tomoritett valtozat, LZFu -- ritkan kell kozvetlenul), codepage (str vagy
-    None), vagy None ha nem TNEF / hibas a signature.
+    None), attachments (lista: {'name': str vagy None, 'data': bytes}),
+    vagy None ha nem TNEF / hibas a signature.
     """
     if len(data) < 6 or _uint32(data, 0)[0] != TNEF_SIGNATURE:
         return None
 
     out = {'body': None, 'htmlbody': None, 'rtfbody_compressed': None, 'rtfbody': None, 'codepage': None}
+    want_attachments = attachments
+    attachments = []  # a nyers attachment adatok: title, data, props
     oem_codepage = 'cp1252'  # ATTOEMCODEPAGE hianyaban ez a TNEF-default
     offset = 6
     n = len(data)
+    budget = [2 * n + 1024 * 1024]  # a resync soran checksumolhato byte-ok (DoS vedelem, a merettel aranyos)
     while offset + 11 < n:
         level = _uint8(data, offset)[0]
         name = _uint16(data, offset + 1)[0]
         length = _uint32(data, offset + 5)[0]
         obj_total = length + 11  # 9 byte fejlec + adat + 2 byte checksum
-        obj_data = data[offset + 9: offset + 9 + length]
+        obj_end = offset + 9 + length
+
+        # megengedo feldolgozas: ha a hossz lehetetlen, vagy utana nem ertelmes fejlec jon (es a checksum
+        # sem stimmel), akkor a kovetkezo ep attributumig tart ez az attributum (resync); ha nincs ilyen,
+        # akkor a file vegeig (csonka adat).
+        nxt = offset + obj_total
+        if nxt > n or (nxt < n and not _plausible_hdr(data, nxt, n) and not _checksum_ok(data, offset, length)):
+            nxt = _resync(data, offset + 9, n, budget)
+            if nxt is None:
+                obj_end = n
+                obj_total = n - offset
+            else:
+                obj_end = max(offset + 9, nxt - 2)
+                obj_total = nxt - offset
+
+        # az adatot csak akkor vagjuk ki (masoljuk), ha kell: a nem hasznalt attributumok (es
+        # attachments=False eseten a csatolmanyok) adata igy nem foglal memoriat
+        if (level == LVL_MESSAGE and name in (ATTOEMCODEPAGE, ATTMAPIPROPS, ATTBODY)) or \
+           (level == LVL_ATTACHMENT and want_attachments):
+            obj_data = data[offset + 9:obj_end]
+        else:
+            obj_data = b''
 
         if level == LVL_MESSAGE:
             if name == ATTOEMCODEPAGE and len(obj_data) >= 4:
                 oem_codepage = _codepage_name(_uint32(obj_data, 0)[0])
             elif name == ATTMAPIPROPS:
-                props = _decode_mapi_props(obj_data, oem_codepage)
+                try:
+                    props = _decode_mapi_props(obj_data, oem_codepage)
+                except Exception:
+                    props = {}  # hibas property-lista: a tobbi attributumot (attachment-ek!) meg feldolgozzuk
                 for k, v in props.items():
                     if v is not None:
                         out[k] = v
             elif name == ATTBODY and not out['body']:
                 out['body'] = obj_data
-        # LVL_ATTACHMENT es minden mas: nem erdekel minket, csak atugorjuk
+        elif level == LVL_ATTACHMENT and want_attachments:
+            if name == ATTATTACHRENDDATA or not attachments:
+                attachments.append({'title': None, 'data': None, 'props': {}})
+            att = attachments[-1]
+            if name == ATTATTACHTITLE:
+                try: att['title'] = obj_data.rstrip(b'\x00').decode(oem_codepage)
+                except Exception: att['title'] = obj_data.rstrip(b'\x00').decode('latin-1')
+            elif name == ATTATTACHDATA:
+                att['data'] = obj_data
+            elif name == ATTATTACHMENT:
+                try:
+                    att['props'] = _decode_mapi_props(obj_data, oem_codepage, attach=True)
+                except Exception:
+                    pass
+        # minden mas: nem erdekel minket, csak atugorjuk
 
         if obj_total <= 0:
             break  # vedelem vegtelen ciklus ellen hibas/korrupt adat eseten
         offset += obj_total
+
+    out['attachments'] = []
+    for att in attachments:
+        props = att['props']
+        data = att['data'] if att['data'] is not None else props.get('data')
+        if data is None:
+            continue  # nincs adat (pl. csak RendData volt)
+        name = None
+        for n in (props.get(MAPI_ATTACH_LONG_FILENAME), att['title'],
+                  props.get(MAPI_ATTACH_FILENAME), props.get(MAPI_DISPLAY_NAME)):
+            if n:
+                name = n if isinstance(n, str) else n.decode('latin-1')
+                break
+        out['attachments'].append({'name': name, 'data': data})
 
     if out['rtfbody_compressed']:
         try:
@@ -283,8 +425,8 @@ def decompress_rtf(data):
             for i in range(1, 9):
                 if control[-i] == '1':
                     val = contents.read(2)
-                    if not val:
-                        break
+                    if len(val) < 2:
+                        break  # csonka adat: ami eddig kijott, azt visszaadjuk
                     token = struct.unpack('>H', val)[0]
                     offset = (token >> 4) & 0b111111111111
                     length = token & 0b1111
@@ -316,12 +458,15 @@ if __name__ == "__main__":
     import sys
     with open(sys.argv[1], "rb") as f:
         data = f.read()
-    result = parse_tnef_body(data)
+    result = parse_tnef_body(data, attachments=True)
     if result is None:
         print("Nem TNEF fajl vagy hibas signature.")
     else:
         for k, v in result.items():
-            if isinstance(v, bytes):
+            if k == 'attachments':
+                for a in v:
+                    print("attachment: %r %d byte" % (a['name'], len(a['data'])))
+            elif isinstance(v, bytes):
                 print("%s: %d byte" % (k, len(v)))
             else:
                 print("%s: %r" % (k, v))
