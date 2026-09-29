@@ -18,10 +18,10 @@ sajat docstring-jet):
 Hasznalat:
     body = parse_tnef_body(data)   # data: a winmail.dat / attMAPI_ATTACH_DATA_OBJ nyers bajtjai
     body = parse_tnef_body(data, attachments=True)   # a csatolmanyokat is kibontja
-    body['htmlbody']            # bytes vagy None
+    body['htmlbody']            # str (mar dekodolva) vagy None
     body['rtfbody_compressed']  # bytes (LZFu-tomoritett!) vagy None -- decompress_rtf()-fel bonthato ki
-    body['body']                # bytes vagy None (plain text body)
-    body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None
+    body['body']                # str (mar dekodolva) vagy None (plain text body)
+    body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None -- a body/htmlbody mar ezzel van dekodolva
     body['attachments']         # [{'name': str vagy None, 'data': bytes}, ...]  (attachments=False eseten ures)
 """
 import codecs
@@ -120,7 +120,8 @@ def _fixed_size(attr_type):
 
 def _skip_variable(data, offset, is_multi, attr_type, oem_codepage):
     # SZMAPI_STRING / UNICODE_STRING / OBJECT / BINARY / UNSPECIFIED
-    # visszaadja: (ertekek listaja -- str ha STRING/UNICODE_STRING, egyebkent bytes --, uj offset)
+    # visszaadja: (ertekek listaja, uj offset). Az ertek str, ha UNICODE_STRING, vagy ha STRING es
+    # oem_codepage meg van adva (None eseten a STRING nyers bytes marad, a hivo dekodolja); egyebkent bytes.
     # csonka / hibas adat eseten a hibaig beolvasott (az utolsot esetleg csonkan) ertekeket adja vissza
     if is_multi:
         num_vals = 1
@@ -138,9 +139,8 @@ def _skip_variable(data, offset, is_multi, attr_type, oem_codepage):
         pad = (-length) % 4
         item = data[offset:offset + length]
         if attr_type == SZMAPI_UNICODE_STRING:
-            try: item = item.decode('utf-16')
-            except Exception: pass
-        elif attr_type == SZMAPI_STRING:
+            item = item.decode('utf-16-le', 'replace').lstrip('﻿')  # paratlan hossz eseten is str lesz
+        elif attr_type == SZMAPI_STRING and oem_codepage:
             try: item = item.decode(oem_codepage)
             except Exception: pass
         vals.append(item)
@@ -154,11 +154,29 @@ def _join(values):
     return b"".join(v.rstrip(b'\x00') for v in values)
 
 
+def _join_text(values):
+    # mint _join, de a bytes ertekekrol NEM vagja le a nullakat: UTF-16 kodlapnal az utolso
+    # karakter felso bajtja is 0 lehet. A lezaro nullakat a dekodolas utan a _to_text() vagja le.
+    if values and isinstance(values[0], str):
+        return _join(values)
+    return b"".join(values)
+
+
+def _to_text(value, codepage):
+    # body / htmlbody -> str (None marad None); codepage: mindig letezo python kodlap nev
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode(codepage, 'replace').lstrip('﻿')
+    return value.rstrip('\x00')
+
+
 def _decode_mapi_props(data, oem_codepage, attach=False):
     """vegigmegy a MAPI property-listan, es kigyujti a szamunkra erdekes tageket.
-    A visszaadott 'body'/'htmlbody' str, ha a property tipusa STRING/UNICODE_STRING
-    volt (ekkor mar dekodolva van), egyebkent nyers bytes (ekkor a hivo fixhetul meg
-    az internet_codepage alapjan, ha van ilyen property is a listaban).
+    A visszaadott 'body'/'htmlbody' str, ha a property tipusa UNICODE_STRING volt (ekkor
+    mar dekodolva van), egyebkent (STRING / BINARY) nyers bytes, a lezaro nullakkal egyutt:
+    ezt a parse_tnef_body() dekodolja a 'codepage' (internet codepage) alapjan, mert az a
+    listaban a body utan is johet.
     attach=True eseten (attachment MAPI property-k) a 'data' kulcsban az adat (bytes),
     a MAPI_ATTACH_* / MAPI_DISPLAY_NAME tag-ek kulcsa alatt a nevek vannak."""
     result = {}
@@ -220,7 +238,9 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
         for _ in range(count):
             if offset + 4 > n:
                 break  # hibas darabszam, elfogyott az adat
-            one_vals, offset = _skip_variable(data, offset, num_mv is not None, attr_type, oem_codepage)
+            # uzenet szinten a STRING-et nem dekodoljuk itt (l. _decode_mapi_props docstring)
+            one_vals, offset = _skip_variable(data, offset, num_mv is not None, attr_type,
+                                              oem_codepage if attach else None)
             values.extend(one_vals)
     elif attr_type == SZMAPI_NULL:
         pass
@@ -241,9 +261,9 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
         elif attr_name in (MAPI_ATTACH_LONG_FILENAME, MAPI_ATTACH_FILENAME, MAPI_DISPLAY_NAME):
             result[attr_name] = _join(values)
     elif attr_name in (MAPI_BODY, MAPI_UNCOMPRESSED_BODY):
-        result['body'] = _join(values)
+        result['body'] = _join_text(values)
     elif attr_name == MAPI_BODY_HTML:
-        result['htmlbody'] = _join(values)
+        result['htmlbody'] = _join_text(values)
     elif attr_name == MAPI_RTF_COMPRESSED:
         result['rtfbody_compressed'] = b''.join(v.rstrip(b'\x00') for v in values)
     elif attr_name == MAPI_INTERNET_CODEPAGE and values:
@@ -299,10 +319,11 @@ def parse_tnef_body(data, attachments=False):
     data: a teljes TNEF (winmail.dat) nyers tartalma.
     attachments: True eseten a csatolmanyokat is kibontja (pl. virusellenorzeshez), egyebkent
     (szovegbanyaszat) az attachment szintu attributumokat csak atugorja, es az 'attachments' ures lista.
-    Visszaad egy dict-et: body, htmlbody (bytes), rtfbody (mar dekompresszalva,
-    bytes, vagy None ha nem sikerult/nem volt), rtfbody_compressed (a nyers,
-    meg tomoritett valtozat, LZFu -- ritkan kell kozvetlenul), codepage (str vagy
-    None), attachments (lista: {'name': str vagy None, 'data': bytes}),
+    Visszaad egy dict-et: body, htmlbody (mindig dekodolt str, vagy None), rtfbody (mar
+    dekompresszalva, bytes, vagy None ha nem sikerult/nem volt), rtfbody_compressed (a nyers,
+    meg tomoritett valtozat, LZFu -- ritkan kell kozvetlenul), codepage (az uzenet internet
+    codepage-e python kodlap nevkent, vagy None; csak tajekoztato, ill. az rtfbody 8 bites
+    karaktereihez -- figyelem, lehet nem ASCII-kompatibilis is, pl. utf-16-le), attachments (lista: {'name': str vagy None, 'data': bytes}),
     vagy None ha nem TNEF / hibas a signature.
     """
     if len(data) < 6 or _uint32(data, 0)[0] != TNEF_SIGNATURE:
@@ -355,7 +376,7 @@ def parse_tnef_body(data, attachments=False):
                     if v is not None:
                         out[k] = v
             elif name == ATTBODY and not out['body']:
-                out['body'] = obj_data
+                out['body'] = obj_data.decode(oem_codepage, 'replace')  # a regi TNEF body OEM kodlapos
         elif level == LVL_ATTACHMENT and want_attachments:
             if name == ATTATTACHRENDDATA or not attachments:
                 attachments.append({'title': None, 'data': None, 'props': {}})
@@ -389,6 +410,11 @@ def parse_tnef_body(data, attachments=False):
                 name = n if isinstance(n, str) else n.decode('latin-1')
                 break
         out['attachments'].append({'name': name, 'data': data})
+
+    # a MAPI STRING / BINARY body-k dekodolasa: az uzenet kodlapjaval, ennek hianyaban az OEM kodlappal
+    text_codepage = out['codepage'] or oem_codepage
+    out['body'] = _to_text(out['body'], text_codepage)
+    out['htmlbody'] = _to_text(out['htmlbody'], text_codepage)
 
     if out['rtfbody_compressed']:
         try:

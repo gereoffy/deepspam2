@@ -305,6 +305,24 @@ def html_extract_attr(rawtag, attrname):
 #  <meta content="utf-8" name="charset"/>
 #  <meta charset="utf-8"/>
 
+def parse_rtfhead(data,charset=None):
+  # az RTF sajat kodlapja (\ansicpgNNNN a fejlecben), ha az nincs vagy nem hasznalhato, akkor charset,
+  # vegul cp1252. Mindig letezo es ASCII-kompatibilis kodlapot ad (pl. utf-16 nem jo: az RTF 7 bites, a
+  # kodlap csak a nyers 8 bites byte-okhoz, es a striprtf-nek a \fcharset nelkuli / ismeretlen fcharset-u fontokhoz kell)
+  m=re.search(rb'\\ansicpg(\d{1,5})',data[:4096])
+  for cp in ("cp"+m.group(1).decode() if m else None,charset,"cp1252"):
+    try:
+      if cp and b'{\\rtf1 +x-}'.decode(cp)=='{\\rtf1 +x-}': return cp  # a +x- az utf-7 miatt
+    except (LookupError,UnicodeDecodeError): pass
+  return "cp1252"
+
+def rtf_hex_encoding(cp):
+  # a parse_rtfhead() kodlapjabol a striprtf-nek atadando kodlap a \'xx escape-ekhez: ezek az RTF szerint
+  # egybajtos ANSI kodlapban vannak, ezert a MIME / TNEF charset-bol jovo utf-8 helyett cp1252 (a striprtf
+  # default-ja). Az RTF-ben explicit \ansicpg65001 a parse_rtfhead()-tol "cp65001"-kent jon, az marad.
+  return "cp1252" if cp.lower() in ("utf-8","utf8") else cp
+
+
 def parse_htmlhead(data,charset=None):
   for ret in data.split(b'<'):
     tag=ret.split(b'>')[0].lower()
@@ -559,16 +577,13 @@ def decode_payload(data,ctyp="text/html",charset=None):
 #        print("###### Parse TNEF ######")
         tnefobj = parse_tnef_body(data)
         if tnefobj and tnefobj['htmlbody']:
-            html=tnefobj['htmlbody']
-            if isinstance(html,str):   # STRING/UNICODE_STRING property: a tnef_mini mar dekodolta
-                html=html.encode("utf-8")
-                charset="utf-8"
-            elif tnefobj['codepage']: charset=tnefobj['codepage']
-            data=html2text(html)
+            data=html2text(tnefobj['htmlbody'].encode("utf-8"))   # a tnef_mini mar dekodolta (str)
+            charset="utf-8"
         elif tnefobj and tnefobj['rtfbody'] and rtf_support:
             try:
-                rtf_text=tnefobj['rtfbody'].decode(tnefobj['codepage'] or "cp1252","ignore")
-                data=rtf_to_text(rtf_text).encode("utf-8")
+                cp=parse_rtfhead(tnefobj['rtfbody'],tnefobj['codepage'])
+                rtf_text=tnefobj['rtfbody'].decode(cp,"mixed")
+                data=rtf_to_text(rtf_text,encoding=rtf_hex_encoding(cp),errors="ignore").encode("utf-8")
                 charset="utf-8"
             except Exception:
                 pass  # marad az eredeti (nyers tnef) data, legalabb nem hasal el
@@ -584,6 +599,8 @@ def decode_payload(data,ctyp="text/html",charset=None):
       charset="iso8859-1"
     elif charset in charset_mapping:
       charset=charset_mapping[charset]
+    if ctyp=="application/rtf":
+      charset=parse_rtfhead(data,charset)  # az RTF sajat \ansicpg-je elsobbseget kap a MIME charset-tel szemben
 
     if charset=="utf-8" or is_utf8(data):
         # Try UTF-8:
@@ -601,7 +618,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":
-        data=rtf_to_text(data) # remove RTF markup
+        data=rtf_to_text(data,encoding=rtf_hex_encoding(charset),errors="ignore") # remove RTF markup
     else:
         data=unescape(data)  # fix &gt; etc
 
