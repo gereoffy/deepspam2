@@ -24,6 +24,7 @@ Hasznalat:
     body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None
     body['attachments']         # [{'name': str vagy None, 'data': bytes}, ...]  (attachments=False eseten ures)
 """
+import codecs
 import re
 import struct
 from io import BytesIO
@@ -79,16 +80,31 @@ _uint8 = struct.Struct('<B').unpack_from
 _uint16 = struct.Struct('<H').unpack_from
 _uint32 = struct.Struct('<I').unpack_from
 
-# windows codepage szam -> python kodlap nev (a leggyakoribbak; a tobbi "cpNNNN"-kent probalkozik)
-_CODEPAGE_MAP = {20127: 'ascii', 20866: 'koi8-r', 28591: 'iso-8859-1', 65001: 'utf-8'}
+# windows codepage szam -> python kodlap nev, azokra amiknel a "cpNNNN" nev nem letezik Pythonban
+# (a 28591..28606 ISO-8859-x lapokat a _codepage_name() szamolja)
+_CODEPAGE_MAP = {
+    1200: 'utf-16-le', 1201: 'utf-16-be', 12000: 'utf-32-le', 12001: 'utf-32-be',
+    65000: 'utf-7', 65001: 'utf-8',
+    20127: 'ascii', 20866: 'koi8-r', 21866: 'koi8-u',
+    10000: 'mac-roman', 10006: 'mac-greek', 10007: 'mac-cyrillic', 10029: 'mac-latin2',
+    10079: 'mac-iceland', 10081: 'mac-turkish',
+    50220: 'iso-2022-jp', 50221: 'iso-2022-jp', 50222: 'iso-2022-jp', 50225: 'iso-2022-kr',
+    51932: 'euc-jp', 51949: 'euc-kr', 52936: 'hz', 54936: 'gb18030',
+}
 
 
 def _codepage_name(cp):
-    if cp in _CODEPAGE_MAP:
-        return _CODEPAGE_MAP[cp]
-    if cp <= 1258:
-        return "cp%d" % cp
-    return "cp1252"  # fallback
+    # mindig letezo python kodlap nevet ad vissza (ismeretlen / hibas szam eseten cp1252-t)
+    name = _CODEPAGE_MAP.get(cp)
+    if name is None and 28591 <= cp <= 28606 and cp != 28602:  # ISO-8859-1..16 (a -12 nem letezik)
+        name = "iso-8859-%d" % (cp - 28590)
+    if name is None:
+        name = "cp%d" % cp  # pl. cp1250, cp852, cp932
+    try:
+        codecs.lookup(name)
+    except LookupError:
+        return "cp1252"  # fallback: TNEF-default
+    return name
 
 
 def _fixed_size(attr_type):
