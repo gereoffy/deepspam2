@@ -189,10 +189,11 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
         num_mv = _uint32(data, offset)[0]
         offset += 4
 
+    # ertekek szama: multi-value eseten num_mv (lehet 0 is!), egyebkent 1
+    count = num_mv if num_mv is not None else 1
     fixed = _fixed_size(attr_type)
     values = []
     if fixed is not None:
-        count = num_mv or 1
         if offset + fixed * count > n:
             count = max(0, (n - offset) // fixed)  # hibas darabszam: csak ami belefer
         for _ in range(count):
@@ -200,10 +201,10 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
             offset += fixed
     elif attr_type in (SZMAPI_STRING, SZMAPI_UNICODE_STRING, SZMAPI_OBJECT,
                        SZMAPI_BINARY, SZMAPI_UNSPECIFIED):
-        for _ in range(num_mv or 1):
+        for _ in range(count):
             if offset + 4 > n:
                 break  # hibas darabszam, elfogyott az adat
-            one_vals, offset = _skip_variable(data, offset, bool(num_mv), attr_type, oem_codepage)
+            one_vals, offset = _skip_variable(data, offset, num_mv is not None, attr_type, oem_codepage)
             values.extend(one_vals)
     elif attr_type == SZMAPI_NULL:
         pass
@@ -212,7 +213,7 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
         return None
 
     # 2-byte padding parossag miatt (csak SHORT/BOOLEAN eseten, ahogy a tnefparse is csinalja)
-    if (num_mv or 1) % 2 and attr_type in (SZMAPI_SHORT, SZMAPI_BOOLEAN):
+    if count % 2 and attr_type in (SZMAPI_SHORT, SZMAPI_BOOLEAN):
         offset += 2
 
     if attr_type == SZMAPI_OBJECT:
