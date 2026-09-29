@@ -557,10 +557,14 @@ def decode_payload(data,ctyp="text/html",charset=None):
         charset="utf-8"
     elif ctyp=="application/ms-tnef":
 #        print("###### Parse TNEF ######")
-        tnefobj = parse_tnef_body(data) #     out = {'body': None, 'htmlbody': None, 'rtfbody_compressed': None, 'codepage': None}
+        tnefobj = parse_tnef_body(data)
         if tnefobj and tnefobj['htmlbody']:
-            if tnefobj['codepage']: charset=tnefobj['codepage']
-            data=html2text(tnefobj['htmlbody'])
+            html=tnefobj['htmlbody']
+            if isinstance(html,str):   # STRING/UNICODE_STRING property: a tnef_mini mar dekodolta
+                html=html.encode("utf-8")
+                charset="utf-8"
+            elif tnefobj['codepage']: charset=tnefobj['codepage']
+            data=html2text(html)
         elif tnefobj and tnefobj['rtfbody'] and rtf_support:
             try:
                 rtf_text=tnefobj['rtfbody'].decode(tnefobj['codepage'] or "cp1252","ignore")
