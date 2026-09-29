@@ -3,12 +3,12 @@ Minimal, allofuggosegmentes TNEF (winmail.dat) body-kinyero.
 Csak azt csinalja amire szuksegunk van: a HTML / RTF(compressed) / plain body
 kinyereset a TNEF attributum-streambol, a MAPI Properties (0x9003) blokkon
 keresztul, valamint az attachment-ek (nev + adat) kibontasat.
-Recipient-tablat, dátumokat stb. NEM dolgoz fel.
+Recipient-tablat, datumokat stb. NEM dolgoz fel.
 
 Alapja (reverse-engineered a forrasbol, nem szo szerinti masolat):
   https://github.com/koodaamo/tnefparse  (LGPL-3.0)
-A MAPI property-tipusok mérete/elrendezese szükséges ahhoz, hogy a nem
-érdekes property-ken is helyesen at tudjunk lepni (a stream szekvencialis).
+A MAPI property-tipusok merete/elrendezese szukseges ahhoz, hogy a nem
+erdekes property-ken is helyesen at tudjunk lepni (a stream szekvencialis).
 
 A decompress_rtf() fuggveny a compressed_rtf csomagbol van atemelve (csak a
 dekompresszios resz, a compress() es a CRC-ellenorzes nelkul -- lasd a fuggveny
@@ -19,9 +19,11 @@ Hasznalat:
     body = parse_tnef_body(data)   # data: a winmail.dat / attMAPI_ATTACH_DATA_OBJ nyers bajtjai
     body = parse_tnef_body(data, attachments=True)   # a csatolmanyokat is kibontja
     body['htmlbody']            # str (mar dekodolva) vagy None
-    body['rtfbody_compressed']  # bytes (LZFu-tomoritett!) vagy None -- decompress_rtf()-fel bonthato ki
+    body['rtfbody']             # bytes (a kitomoritett RTF) vagy None
+    body['rtfbody_compressed']  # bytes (a nyers, LZFu-tomoritett valtozat) vagy None -- ritkan kell kozvetlenul
     body['body']                # str (mar dekodolva) vagy None (plain text body)
-    body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None -- a body/htmlbody mar ezzel van dekodolva
+    body['codepage']            # str, python kodlap nev (pl. "cp1250"), vagy None: az uzenet internet codepage-e,
+                                #   a body/htmlbody ezzel van dekodolva (ha None, az OEM kodlappal)
     body['attachments']         # [{'name': str vagy None, 'data': bytes}, ...]  (attachments=False eseten ures)
 """
 import codecs
@@ -118,7 +120,7 @@ def _fixed_size(attr_type):
     }.get(attr_type)
 
 
-def _skip_variable(data, offset, is_multi, attr_type, oem_codepage):
+def _read_variable(data, offset, is_multi, attr_type, oem_codepage):
     # SZMAPI_STRING / UNICODE_STRING / OBJECT / BINARY / UNSPECIFIED
     # visszaadja: (ertekek listaja, uj offset). Az ertek str, ha UNICODE_STRING, vagy ha STRING es
     # oem_codepage meg van adva (None eseten a STRING nyers bytes marad, a hivo dekodolja); egyebkent bytes.
@@ -139,7 +141,7 @@ def _skip_variable(data, offset, is_multi, attr_type, oem_codepage):
         pad = (-length) % 4
         item = data[offset:offset + length]
         if attr_type == SZMAPI_UNICODE_STRING:
-            item = item.decode('utf-16-le', 'replace').lstrip('﻿')  # paratlan hossz eseten is str lesz
+            item = item.decode('utf-16-le', 'replace').lstrip('\ufeff')  # paratlan hossz eseten is str lesz
         elif attr_type == SZMAPI_STRING and oem_codepage:
             try: item = item.decode(oem_codepage)
             except Exception: pass
@@ -167,7 +169,7 @@ def _to_text(value, codepage):
     if value is None:
         return None
     if isinstance(value, bytes):
-        value = value.decode(codepage, 'replace').lstrip('﻿')
+        value = value.decode(codepage, 'replace').lstrip('\ufeff')
     return value.rstrip('\x00')
 
 
@@ -239,7 +241,7 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
             if offset + 4 > n:
                 break  # hibas darabszam, elfogyott az adat
             # uzenet szinten a STRING-et nem dekodoljuk itt (l. _decode_mapi_props docstring)
-            one_vals, offset = _skip_variable(data, offset, num_mv is not None, attr_type,
+            one_vals, offset = _read_variable(data, offset, num_mv is not None, attr_type,
                                               oem_codepage if attach else None)
             values.extend(one_vals)
     elif attr_type == SZMAPI_NULL:
@@ -265,7 +267,7 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
     elif attr_name == MAPI_BODY_HTML:
         result['htmlbody'] = _join_text(values)
     elif attr_name == MAPI_RTF_COMPRESSED:
-        result['rtfbody_compressed'] = b''.join(v.rstrip(b'\x00') for v in values)
+        result['rtfbody_compressed'] = b''.join(values)  # binaris: a vegi 0 byte-ok is adatok lehetnek
     elif attr_name == MAPI_INTERNET_CODEPAGE and values:
         try:
             result['codepage'] = _codepage_name(struct.unpack('<I', values[0][:4])[0])
@@ -276,8 +278,9 @@ def _decode_one_prop(data, offset, n, oem_codepage, attach, result):
 
 
 # egy TNEF attributum fejlece: level(1) name(2) type(2) length(4), utana az adat es 2 byte checksum.
-# A resync ilyen mintaju fejleceket keres: level 1/2, name 0x00xx/0x80xx/0x90xx, type 0..9
-_HDR_RE = re.compile(rb'[\x01\x02].[\x00\x80\x90][\x00-\x09]\x00', re.S)
+# A resync ilyen mintaju fejleceket keres: level 1/2, name 0x00xx/0x80xx/0x90xx, type 0..9.
+# Lookahead (nulla szelessegu talalat), hogy az egymasba logo jelolteket is megtalalja.
+_HDR_RE = re.compile(rb'(?=[\x01\x02].[\x00\x80\x90][\x00-\x09]\x00)', re.S)
 _RESYNC_SMALL = 65536  # ekkora attributum checksumjat akkor is megnezzuk, ha utana nem ertelmes fejlec jon
 
 
@@ -323,8 +326,8 @@ def parse_tnef_body(data, attachments=False):
     dekompresszalva, bytes, vagy None ha nem sikerult/nem volt), rtfbody_compressed (a nyers,
     meg tomoritett valtozat, LZFu -- ritkan kell kozvetlenul), codepage (az uzenet internet
     codepage-e python kodlap nevkent, vagy None; csak tajekoztato, ill. az rtfbody 8 bites
-    karaktereihez -- figyelem, lehet nem ASCII-kompatibilis is, pl. utf-16-le), attachments (lista: {'name': str vagy None, 'data': bytes}),
-    vagy None ha nem TNEF / hibas a signature.
+    karaktereihez -- figyelem, lehet nem ASCII-kompatibilis is, pl. utf-16-le), attachments
+    (lista: {'name': str vagy None, 'data': bytes}), vagy None ha nem TNEF / hibas a signature.
     """
     if len(data) < 6 or _uint32(data, 0)[0] != TNEF_SIGNATURE:
         return None
@@ -336,7 +339,7 @@ def parse_tnef_body(data, attachments=False):
     offset = 6
     n = len(data)
     budget = [2 * n + 1024 * 1024]  # a resync soran checksumolhato byte-ok (DoS vedelem, a merettel aranyos)
-    while offset + 11 < n:
+    while offset + 11 <= n:
         level = _uint8(data, offset)[0]
         name = _uint16(data, offset + 1)[0]
         length = _uint32(data, offset + 5)[0]
@@ -400,16 +403,16 @@ def parse_tnef_body(data, attachments=False):
     out['attachments'] = []
     for att in attachments:
         props = att['props']
-        data = att['data'] if att['data'] is not None else props.get('data')
-        if data is None:
+        att_data = att['data'] if att['data'] is not None else props.get('data')
+        if att_data is None:
             continue  # nincs adat (pl. csak RendData volt)
-        name = None
-        for n in (props.get(MAPI_ATTACH_LONG_FILENAME), att['title'],
-                  props.get(MAPI_ATTACH_FILENAME), props.get(MAPI_DISPLAY_NAME)):
-            if n:
-                name = n if isinstance(n, str) else n.decode('latin-1')
+        att_name = None
+        for cand in (props.get(MAPI_ATTACH_LONG_FILENAME), att['title'],
+                     props.get(MAPI_ATTACH_FILENAME), props.get(MAPI_DISPLAY_NAME)):
+            if cand:
+                att_name = cand if isinstance(cand, str) else cand.decode('latin-1')
                 break
-        out['attachments'].append({'name': name, 'data': data})
+        out['attachments'].append({'name': att_name, 'data': att_data})
 
     # a MAPI STRING / BINARY body-k dekodolasa: az uzenet kodlapjaval, ennek hianyaban az OEM kodlappal
     text_codepage = out['codepage'] or oem_codepage
@@ -418,7 +421,7 @@ def parse_tnef_body(data, attachments=False):
 
     if out['rtfbody_compressed']:
         try:
-            out['rtfbody'] = decompress_rtf(out['rtfbody_compressed'] + b'\x00')
+            out['rtfbody'] = decompress_rtf(out['rtfbody_compressed'])
         except Exception:
             out['rtfbody'] = None
     else:
