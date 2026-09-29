@@ -787,11 +787,13 @@ def parse_ctyp(data,hdr=b'_',ct=None):
 
 
 # https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
-def decode_body(data,encoding):
+def decode_body(data,encoding,binary=True):
     try:
         if encoding=='base64': return a2b_base64(data)
 #        if encoding=='quoted-printable': return a2b_qp(data)
-        if encoding in ['quoted-printable','utf8','utf-8']: return a2b_qp(data)
+        if encoding in ['quoted-printable','utf8','utf-8']:
+            if binary: data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')   # str-nel ugyanez '\r\n' /
+            return a2b_qp(data)
     except Exception as e:
         print("PayloadDecodingExc:",repr(e))
 #    if not encoding in ['7bit','8bit','binary','utf-8']: print("UnknownEncoding:",encoding)
