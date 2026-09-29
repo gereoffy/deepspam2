@@ -1,6 +1,7 @@
 
 import io
 import codecs
+import encodings
 import re
 import zipfile
 
@@ -21,195 +22,140 @@ try:
 except:
   tnef_support=False
 
-charset_mapping = {
+# Karakterkeszlet-nevek, amiket a Python nem ismer, de levelekben / HTML-ben / RTF-ben elofordulnak.
+# Egy codec-keresot regisztralunk rajuk, igy barmelyik decode() / codecs.lookup() felismeri oket (a striprtf-ben
+# is), nem kell minden dekodolas elott kulon lekepezni. A Python a keresonek csak az altala nem ismert neveket adja
+# at, normalizalva (kisbetu, a nem alfanumerikus reszek '_'-ra cserelve, pl. 'X-Mac-CE' -> 'x_mac_ce').
+codec_aliases = {
     'cp-850':              'cp850',
     '_iso-2022-jp$esc':    'iso-2022-jp',
     'windows-874':         'cp874',
     'x-mac-ce':            'maccentraleurope',
     'iso-8859-8-i':        'iso-8859-8',
-    'utf8':                'utf-8',
     'unicode-1-1-utf-8':   'utf-8',
-    'utf-16':              'utf-16le',
 
     # source: /usr/local/lib/python3.10/dist-packages/webencodings/labels.py
-    '866':                 'ibm866',
-    'cp866':               'ibm866',
-    'csibm866':            'ibm866',
-    'csisolatin2':         'iso-8859-2',
-    'iso-ir-101':          'iso-8859-2',
     'iso-88-2':            'iso-8859-2',
-    'iso8859-2':           'iso-8859-2',
     'iso88592':            'iso-8859-2',
-    'iso_8859-2':          'iso-8859-2',
-    'iso_8859-2:1987':     'iso-8859-2',
-    'l2':                  'iso-8859-2',
-    'latin2':              'iso-8859-2',
-    'csisolatin3':         'iso-8859-3',
-    'iso-ir-109':          'iso-8859-3',
-    'iso8859-3':           'iso-8859-3',
     'iso88593':            'iso-8859-3',
-    'iso_8859-3':          'iso-8859-3',
-    'iso_8859-3:1988':     'iso-8859-3',
-    'l3':                  'iso-8859-3',
-    'latin3':              'iso-8859-3',
-    'csisolatin4':         'iso-8859-4',
-    'iso-ir-110':          'iso-8859-4',
-    'iso8859-4':           'iso-8859-4',
     'iso88594':            'iso-8859-4',
-    'iso_8859-4':          'iso-8859-4',
-    'iso_8859-4:1988':     'iso-8859-4',
-    'l4':                  'iso-8859-4',
-    'latin4':              'iso-8859-4',
-    'csisolatincyrillic':  'iso-8859-5',
-    'cyrillic':            'iso-8859-5',
-    'iso-ir-144':          'iso-8859-5',
-    'iso8859-5':           'iso-8859-5',
     'iso88595':            'iso-8859-5',
-    'iso_8859-5':          'iso-8859-5',
-    'iso_8859-5:1988':     'iso-8859-5',
-    'arabic':              'iso-8859-6',
-    'asmo-708':            'iso-8859-6',
     'csiso88596e':         'iso-8859-6',
     'csiso88596i':         'iso-8859-6',
-    'csisolatinarabic':    'iso-8859-6',
-    'ecma-114':            'iso-8859-6',
     'iso-8859-6-e':        'iso-8859-6',
     'iso-8859-6-i':        'iso-8859-6',
-    'iso-ir-127':          'iso-8859-6',
-    'iso8859-6':           'iso-8859-6',
     'iso88596':            'iso-8859-6',
-    'iso_8859-6':          'iso-8859-6',
-    'iso_8859-6:1987':     'iso-8859-6',
-    'csisolatingreek':     'iso-8859-7',
-    'ecma-118':            'iso-8859-7',
-    'elot_928':            'iso-8859-7',
-    'greek':               'iso-8859-7',
-    'greek8':              'iso-8859-7',
-    'iso-ir-126':          'iso-8859-7',
-    'iso8859-7':           'iso-8859-7',
     'iso88597':            'iso-8859-7',
-    'iso_8859-7':          'iso-8859-7',
-    'iso_8859-7:1987':     'iso-8859-7',
     'sun_eu_greek':        'iso-8859-7',
     'csiso88598e':         'iso-8859-8',
-    'csisolatinhebrew':    'iso-8859-8',
-    'hebrew':              'iso-8859-8',
     'iso-8859-8-e':        'iso-8859-8',
-    'iso-ir-138':          'iso-8859-8',
-    'iso8859-8':           'iso-8859-8',
     'iso88598':            'iso-8859-8',
-    'iso_8859-8':          'iso-8859-8',
-    'iso_8859-8:1988':     'iso-8859-8',
     'visual':              'iso-8859-8',
-#    'csiso88598i':         'iso-8859-8-i',  # LookupError: unknown encoding: iso-8859-8-i
-#    'iso-8859-8-i':        'iso-8859-8-i',
-#    'logical':             'iso-8859-8-i',
-    'csisolatin6':         'iso-8859-10',
-    'iso-ir-157':          'iso-8859-10',
-    'iso8859-10':          'iso-8859-10',
+    'csiso88598i':         'iso-8859-8',  # iso-8859-8-i: a logikai irasirany jelolese, a dekodolas ugyanaz
+    'logical':             'iso-8859-8',
     'iso885910':           'iso-8859-10',
-    'l6':                  'iso-8859-10',
-    'latin6':              'iso-8859-10',
     'dos-874':             'iso-8859-11',
-    'iso8859-11':          'iso-8859-11',
     'iso885911':           'iso-8859-11',
-    'tis-620':             'iso-8859-11',
-    'windows-874':         'iso-8859-11',
-    'iso8859-13':          'iso-8859-13',
     'iso885913':           'iso-8859-13',
-    'iso8859-14':          'iso-8859-14',
     'iso885914':           'iso-8859-14',
     'csisolatin9':         'iso-8859-15',
-    'iso8859-15':          'iso-8859-15',
     'iso885915':           'iso-8859-15',
-    'iso_8859-15':         'iso-8859-15',
-    'l9':                  'iso-8859-15',
-    'cskoi8r':             'koi8-r',
     'koi':                 'koi8-r',
     'koi8':                'koi8-r',
-    'koi8_r':              'koi8-r',
-    'koi8-u':              'koi8-u',
     'csmacintosh':         'macintosh',
     'mac':                 'macintosh',
     'x-mac-roman':         'macintosh',
-    'cp1250':              'windows-1250',
     'x-cp1250':            'windows-1250',
-    'cp1251':              'windows-1251',
     'x-cp1251':            'windows-1251',
+    'iso88591':            'windows-1252',
+    'x-cp1252':            'windows-1252',
+    'x-cp1253':            'windows-1253',
+    'iso88599':            'windows-1254',
+    'x-cp1254':            'windows-1254',
+    'x-cp1255':            'windows-1255',
+    'x-cp1256':            'windows-1256',
+    'x-cp1257':            'windows-1257',
+    'x-cp1258':            'windows-1258',
+    'x-mac-cyrillic':      'mac-cyrillic',
+    'x-mac-ukrainian':     'mac-cyrillic',
+    'csgb2312':            'gbk',
+    'gb_2312':             'gbk',
+    'gb_2312-80':          'gbk',
+    'x-gbk':               'gbk',
+    'cn-big5':             'big5',
+    'x-x-big5':            'big5',
+    'cseucpkdfmtjapanese': 'euc-jp',
+    'x-euc-jp':            'euc-jp',
+    'windows-31j':         'shift_jis',
+    'x-sjis':              'shift_jis',
+    'cseuckr':             'euc-kr',
+    'csksc56011987':       'euc-kr',
+    'iso-ir-149':          'euc-kr',
+    'ks_c_5601-1989':      'euc-kr',
+    'ksc_5601':            'euc-kr',
+    'windows-949':         'euc-kr',
+
+    # a striprtf charset_map-jenek nem letezo mac_* codec-nevei (\fcharset77..89); a hebrew / thai kozelites
+    'mac_ce':              'mac_latin2',
+    'mac_rumanian':        'mac_romanian',
+    'mac_ukrainian':       'mac_cyrillic',
+    'mac_japanese':        'shift_jis',
+    'mac_chinesetrad':     'big5',
+    'mac_chinesesimp':     'gbk',
+    'mac_korean':          'euc_kr',
+    'mac_hebrew':          'cp1255',
+    'mac_thai':            'cp874',
+}
+_codec_aliases = {encodings.normalize_encoding(k).lower(): v for k, v in codec_aliases.items()}
+
+def _codec_alias_search(name):
+    target = _codec_aliases.get(name)
+    if target:
+        try: return codecs.lookup(target)
+        except LookupError: pass
+    return None
+
+codecs.register(_codec_alias_search)
+
+# Szandekos felulirasok: ezeket a neveket a Python is ismeri, de mashogy dekodolna (a WHATWG / bongeszok szerint
+# pl. a latin1 / us-ascii valojaban windows-1252). A codec-kereso ezeket nem kapja meg, es globalisan sem szabad
+# atirni oket (az email modul, a tokenizerek stb. a pontos latin-1-re epitenek), ezert csak a sajat dekodolasainknal
+# alkalmazzuk, a charset_name() fuggvenyen keresztul.
+charset_overrides = {
+    'utf-16':              'utf-16le',
+    'tis-620':             'iso-8859-11',
     'ansi_x3.4-1968':      'windows-1252',
     'ascii':               'windows-1252',
-    'cp1252':              'windows-1252',
     'cp819':               'windows-1252',
     'csisolatin1':         'windows-1252',
     'ibm819':              'windows-1252',
     'iso-8859-1':          'windows-1252',
     'iso-ir-100':          'windows-1252',
     'iso8859-1':           'windows-1252',
-    'iso88591':            'windows-1252',
     'iso_8859-1':          'windows-1252',
     'iso_8859-1:1987':     'windows-1252',
     'l1':                  'windows-1252',
     'latin1':              'windows-1252',
     'us-ascii':            'windows-1252',
-    'x-cp1252':            'windows-1252',
-    'cp1253':              'windows-1253',
-    'x-cp1253':            'windows-1253',
-    'cp1254':              'windows-1254',
     'csisolatin5':         'windows-1254',
     'iso-8859-9':          'windows-1254',
     'iso-ir-148':          'windows-1254',
     'iso8859-9':           'windows-1254',
-    'iso88599':            'windows-1254',
     'iso_8859-9':          'windows-1254',
     'iso_8859-9:1989':     'windows-1254',
     'l5':                  'windows-1254',
     'latin5':              'windows-1254',
-    'x-cp1254':            'windows-1254',
-    'cp1255':              'windows-1255',
-    'x-cp1255':            'windows-1255',
-    'cp1256':              'windows-1256',
-    'x-cp1256':            'windows-1256',
-    'cp1257':              'windows-1257',
-    'x-cp1257':            'windows-1257',
-    'cp1258':              'windows-1258',
-    'x-cp1258':            'windows-1258',
-    'x-mac-cyrillic':      'mac-cyrillic',
-    'x-mac-ukrainian':     'mac-cyrillic',
     'chinese':             'gbk',
-    'csgb2312':            'gbk',
     'csiso58gb231280':     'gbk',
     'gb2312':              'gbk',
-    'gb_2312':             'gbk',
-    'gb_2312-80':          'gbk',
     'iso-ir-58':           'gbk',
-    'x-gbk':               'gbk',
-#    'gb18030':             'gb18030',
-#    'hz-gb-2312':          'hz-gb-2312',
-#    'big5':                'big5',
     'big5-hkscs':          'big5',
-    'cn-big5':             'big5',
-    'csbig5':              'big5',
-    'x-x-big5':            'big5',
-    'cseucpkdfmtjapanese': 'euc-jp',
-    'x-euc-jp':            'euc-jp',
-    'csiso2022jp':         'iso-2022-jp',
-    'csshiftjis':          'shift_jis',
     'ms_kanji':            'shift_jis',
-    'shift-jis':           'shift_jis',
-    'sjis':                'shift_jis',
-    'windows-31j':         'shift_jis',
-    'x-sjis':              'shift_jis',
-    'cseuckr':             'euc-kr',
-    'csksc56011987':       'euc-kr',
-    'iso-ir-149':          'euc-kr',
-    'korean':              'euc-kr',
-    'ks_c_5601-1987':      'euc-kr',
-    'ks_c_5601-1989':      'euc-kr',
-    'ksc5601':             'euc-kr',
-    'ksc_5601':            'euc-kr',
-    'windows-949':         'euc-kr',
-    'csiso2022kr':         'iso-2022-kr',
 }
+
+def charset_name(cset):
+    # MIME / HTML charset nev -> a dekodolashoz hasznalando nev (a felulirasok alkalmazasa; az aliasokat a codec-kereso intezi)
+    return charset_overrides.get(cset.lower(), cset) if cset else cset
 
 
 # based on:  /usr/lib/python3.10/html/__init__.py
@@ -595,10 +541,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
             charset="utf-8"
         data=html2text(data)     # binary version!
 
-    if not charset:
-      charset="iso8859-1"
-    elif charset in charset_mapping:
-      charset=charset_mapping[charset]
+    charset=charset_name(charset or "iso8859-1")
     if ctyp=="application/rtf":
       charset=parse_rtfhead(data,charset)  # az RTF sajat \ansicpg-je elsobbseget kap a MIME charset-tel szemben
 
@@ -1015,7 +958,7 @@ def hdrdecode4(h):
                     strips.append([cdec,cset])
             except Exception as e:
                 print(repr(e),cfmt,repr(cenc))
-    return "".join(x[0] if x[1]==None else x[0].decode(charset_mapping.get(x[1],x[1]) or "utf-8","mixed") for x in strips)
+    return "".join(x[0] if x[1]==None else x[0].decode(charset_name(x[1]) or "utf-8","mixed") for x in strips)
 
 
 # RFC 2231 parameter value continuations/encoding:  filename*=UTF-8''sz%C3%A1mla.pdf
@@ -1039,7 +982,7 @@ def rfc2231_decode(ct,key):
                 cset=cs.decode("us-ascii","ignore").lower() or 'us-ascii'
             v=unquote_to_bytes(v)
         raw+=v
-    try: return raw.decode(charset_mapping.get(cset,cset),"mixed")
+    try: return raw.decode(charset_name(cset),"mixed")
     except LookupError: return raw.decode("utf-8","mixed")
 
 # decoded parameter value from parse_ctyp() dict: RFC 2231 (key*=...) preferred, then RFC 2047 (key=...)

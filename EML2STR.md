@@ -23,7 +23,9 @@ Ha az import nem sikerül, a flag `False`, és az `eml2str()` / `get_mimedata()`
 
 | Név | Típus | Leírás |
 |---|---|---|
-| `charset_mapping` | `dict[str, str]` | Nem szabványos / alias karakterkészlet-nevek leképezése Python codec-nevekre (pl. `latin2` → `iso-8859-2`, `ks_c_5601-1987` → `euc-kr`). Figyelem: a `latin1`/`iso-8859-1`/`us-ascii` szándékosan `windows-1252`-re képződik. |
+| `codec_aliases` | `dict[str, str]` | A Python által nem ismert karakterkészlet-nevek (pl. `x-cp1250`, `ks_c_5601-1989`, `x-mac-ce`, a striprtf nem létező `mac_*` nevei) → Python codec-nevek. A modul betöltésekor `codecs.register()`-rel regisztrált codec-kereső kezeli őket, így *bármelyik* `decode()` / `codecs.lookup()` felismeri őket (a striprtf-ben is), kis- és nagybetűtől függetlenül. |
+| `charset_overrides` | `dict[str, str]` | Szándékos felülírások olyan nevekre, amiket a Python is ismer, de másképp dekódolna: a `latin1`/`iso-8859-1`/`us-ascii` → `windows-1252`, `iso-8859-9` → `windows-1254`, `gb2312` → `gbk`, `utf-16` → `utf-16le` stb. Csak a modul saját dekódolásainál érvényes, a `charset_name()`-en keresztül (globálisan nem írható át, mert pl. az `email` modul a pontos latin-1-re épít). |
+| `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
 | `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
 | `ATTR_RE_CACHE` | `dict[str, re.Pattern]` | Az `html_extract_attr()` lefordított regex-cache-e. |
@@ -147,7 +149,7 @@ Lépések:
    TNEF → `parse_tnef_body()` (HTML body → `html2text()`, különben RTF → `rtf_to_text()`);
    HTML (vagy HTML-nek *látszó* text/plain) → charset felülírás a `<head>`-ből (`parse_htmlhead()`),
    ISO-2022-* előzetes dekódolás, majd `html2text()`.
-2. Charset feloldás: alapértelmezés `iso8859-1`, aliasok a `charset_mapping` szerint.
+2. Charset feloldás: alapértelmezés `iso8859-1`, felülírások a `charset_name()` szerint (az aliasokat a codec-kereső kezeli).
 3. Dekódolás: ha `utf-8` vagy `is_utf8()` szerint annak tűnik → szigorú UTF-8, hiba esetén a
    deklarált charset `"mixed"` hibakezelővel; ismeretlen codec esetén UTF-8 `"mixed"`-del.
 4. RTF esetén `rtf_to_text()`, egyébként HTML entitások feloldása (`html.unescape`).
