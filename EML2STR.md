@@ -15,7 +15,8 @@ ami a hibás/"törött" leveleket is feldolgozza.
 | `striprtf.rtf_to_text` | `rtf_support` | `application/rtf` részek és TNEF-ben lévő RTF body szöveggé alakítása. Ha nincs telepítve, vagy kivételt dob, a beépített `rtf_fallback_text()` dolgozik helyette (`rtf_to_text_safe()`), így az RTF részek striprtf nélkül is feldolgozódnak (az `rtf_support` flaget csak a `rtf_to_text_safe()` nézi). |
 | `tnef_mini.parse_tnef_body` | `tnef_support` | `application/ms-tnef` (Outlook `winmail.dat`) részek feldolgozása |
 
-Ha az import nem sikerül, a flag `False`, és az `eml2str()` / `get_mimedata()` ezeket a részeket kihagyja.
+Ha az import nem sikerül, a flag `False`. A TNEF részeket ekkor az `eml2str()` / `get_mimedata()` kihagyja,
+az RTF részeket viszont a beépített kinyerővel feldolgozza.
 
 ---
 
@@ -27,7 +28,7 @@ Ha az import nem sikerül, a flag `False`, és az `eml2str()` / `get_mimedata()`
 | `charset_overrides` | `dict[str, str]` | Szándékos felülírások olyan nevekre, amiket a Python is ismer, de másképp dekódolna: a `latin1`/`iso-8859-1`/`us-ascii` → `windows-1252`, `iso-8859-9` → `windows-1254`, `gb2312` → `gbk`, `utf-16` → `utf-16le` stb. Csak a modul saját dekódolásainál érvényes, a `charset_name()`-en keresztül (globálisan nem írható át, mert pl. az `email` modul a pontos latin-1-re épít). |
 | `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
 | `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. |
-| `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, és a nevesített írásjelek / szimbólumok leképezése. |
+| `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_font_re`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, a fonttábla `\fN` bejegyzéseit kereső regex (`rtf_font_codepages()`), és a nevesített írásjelek / szimbólumok leképezése. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
 | `ATTR_RE_CACHE` | `dict[str, re.Pattern]` | Az `html_extract_attr()` lefordított regex-cache-e. |
 | `TAG_RE3`, `TAG_RE4`, `TAG_RE6` | `re.Pattern` | URL, e-mail cím és `.hu` domain felismerő regexek (`remove_url()`). `TAG_RE5` (számok) definiálva, de nincs használva. |
@@ -147,7 +148,7 @@ Egy (már transfer-decoded) MIME rész bájtjait alakítja végleges, tiszta Uni
 
 Lépések:
 1. Típus szerinti előfeldolgozás: `text/calendar`/`application/ics` → `parse_ics()`; DOCX → `parse_docx()`;
-   TNEF → `parse_tnef_body()` (HTML body → `html2text()`, különben az RTF body a `parse_rtfhead()` szerinti
+   TNEF → `parse_tnef_body()` (a HTML body-t a `tnef_mini` már `str`-ként adja, ezt UTF-8-ra kódolva → `html2text()`, charset `utf-8`; különben az RTF body a `parse_rtfhead()` szerinti
    kódlappal → `rtf_to_text_safe()`; ha ez is hibázik, a nyers TNEF adat marad);
    HTML (vagy HTML-nek *látszó* text/plain) → charset felülírás a `<head>`-ből (`parse_htmlhead()`),
    ISO-2022-* előzetes dekódolás, majd `html2text()`.
@@ -163,13 +164,14 @@ Lépések:
 > Az RTF konverzió striprtf nélkül is működik (`rtf_fallback_text()`), ezért az RTF részeket a hívók
 > `rtf_support` nélkül is feldolgozzák.
 
-### `decode_body(data, encoding)`
+### `decode_body(data, encoding, binary=True)`
 Content-Transfer-Encoding dekódolás.
 
 | Paraméter | Típus | Leírás |
 |---|---|---|
 | `data` | `bytes` | Kódolt törzs. |
 | `encoding` | `str` | `base64`, `quoted-printable` (vagy a hibás `utf8`/`utf-8`, amit QP-ként kezel), `7bit`/`8bit`/`binary`. |
+| `binary` | `bool` | Csak QP-nél számít: ha `True` (alapértelmezés), dekódolás előtt minden sorvéget egységesen CRLF-re alakít (a csupasz LF-et is), így a dekódolt adatban is CRLF sorvégek lesznek. `False` esetén a sorvégek változatlanok. |
 
 **Visszatérés:** `bytes` – dekódolt adat; hiba vagy ismeretlen kódolás esetén az eredeti `data`
 (és egy `print()` üzenet).
@@ -304,7 +306,7 @@ RFC 2047 encoded-word-ös fejléc (pl. `=?UTF-8?B?...?=`, `=?iso-8859-2?Q?...?=`
 
 Kezeli az encoded-word-ök közti whitespace elhagyását, a hibás `==` QP-t, a padding nélküli base64-et,
 és összefűzi az azonos charsetű szomszédos darabokat dekódolás előtt (a karakter közepén kettévágott
-UTF-8 szekvenciák miatt).
+UTF-8 szekvenciák miatt). A charset nevét a `charset_name()` oldja fel (az aliasokat a codec-kereső).
 
 ### `parse_ctyp(data, hdr=b'_', ct=None)`
 `Content-*: érték; param1=érték1; param2="érték 2"` típusú fejlécérték feldolgozása.
