@@ -12,7 +12,7 @@ ami a hibás/"törött" leveleket is feldolgozza.
 
 | Modul | Flag | Mire kell |
 |---|---|---|
-| `striprtf.rtf_to_text` | `rtf_support` | `application/rtf` részek és TNEF-ben lévő RTF body szöveggé alakítása |
+| `striprtf.rtf_to_text` | `rtf_support` | `application/rtf` részek és TNEF-ben lévő RTF body szöveggé alakítása. Ha nincs telepítve, vagy kivételt dob, a beépített `rtf_fallback_text()` dolgozik helyette (`rtf_to_text_safe()`), így az RTF részek striprtf nélkül is feldolgozódnak (az `rtf_support` flaget csak a `rtf_to_text_safe()` nézi). |
 | `tnef_mini.parse_tnef_body` | `tnef_support` | `application/ms-tnef` (Outlook `winmail.dat`) részek feldolgozása |
 
 Ha az import nem sikerül, a flag `False`, és az `eml2str()` / `get_mimedata()` ezeket a részeket kihagyja.
@@ -27,6 +27,7 @@ Ha az import nem sikerül, a flag `False`, és az `eml2str()` / `get_mimedata()`
 | `charset_overrides` | `dict[str, str]` | Szándékos felülírások olyan nevekre, amiket a Python is ismer, de másképp dekódolna: a `latin1`/`iso-8859-1`/`us-ascii` → `windows-1252`, `iso-8859-9` → `windows-1254`, `gb2312` → `gbk`, `utf-16` → `utf-16le` stb. Csak a modul saját dekódolásainál érvényes, a `charset_name()`-en keresztül (globálisan nem írható át, mert pl. az `email` modul a pontos latin-1-re épít). |
 | `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
 | `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. |
+| `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, és a nevesített írásjelek / szimbólumok leképezése. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
 | `ATTR_RE_CACHE` | `dict[str, re.Pattern]` | Az `html_extract_attr()` lefordított regex-cache-e. |
 | `TAG_RE3`, `TAG_RE4`, `TAG_RE6` | `re.Pattern` | URL, e-mail cím és `.hu` domain felismerő regexek (`remove_url()`). `TAG_RE5` (számok) definiálva, de nincs használva. |
@@ -146,17 +147,21 @@ Egy (már transfer-decoded) MIME rész bájtjait alakítja végleges, tiszta Uni
 
 Lépések:
 1. Típus szerinti előfeldolgozás: `text/calendar`/`application/ics` → `parse_ics()`; DOCX → `parse_docx()`;
-   TNEF → `parse_tnef_body()` (HTML body → `html2text()`, különben RTF → `rtf_to_text()`);
+   TNEF → `parse_tnef_body()` (HTML body → `html2text()`, különben az RTF body a `parse_rtfhead()` szerinti
+   kódlappal → `rtf_to_text_safe()`; ha ez is hibázik, a nyers TNEF adat marad);
    HTML (vagy HTML-nek *látszó* text/plain) → charset felülírás a `<head>`-ből (`parse_htmlhead()`),
    ISO-2022-* előzetes dekódolás, majd `html2text()`.
 2. Charset feloldás: alapértelmezés `iso8859-1`, felülírások a `charset_name()` szerint (az aliasokat a codec-kereső kezeli).
+   `application/rtf` esetén az RTF saját `\ansicpg`-je elsőbbséget kap (`parse_rtfhead()`).
 3. Dekódolás: ha `utf-8` vagy `is_utf8()` szerint annak tűnik → szigorú UTF-8, hiba esetén a
    deklarált charset `"mixed"` hibakezelővel; ismeretlen codec esetén UTF-8 `"mixed"`-del.
-4. RTF esetén `rtf_to_text()`, egyébként HTML entitások feloldása (`html.unescape`).
+4. RTF esetén `rtf_to_text_safe()` (a `\'xx` escape-ek kódlapja `rtf_hex_encoding()` szerint), egyébként HTML
+   entitások feloldása (`html.unescape`).
 5. Végül minden karakter átfut az `invalid_charrefs` táblán.
 
-> A `tnef_support` / `rtf_support` flaget itt nem ellenőrzi, ez a hívó (`eml2str()`,
-> `get_mimedata()`) feladata.
+> A `tnef_support` flaget itt nem ellenőrzi, ez a hívó (`eml2str()`, `get_mimedata()`) feladata.
+> Az RTF konverzió striprtf nélkül is működik (`rtf_fallback_text()`), ezért az RTF részeket a hívók
+> `rtf_support` nélkül is feldolgozzák.
 
 ### `decode_body(data, encoding)`
 Content-Transfer-Encoding dekódolás.
@@ -192,6 +197,50 @@ Jellemzők:
 - A `LINK_ATTRS` szerinti linkek (sorrendtartó deduplikálással) a szöveg végére kerülnek
   `URL: <max. 128 karakter>` sorokként.
 - A HTML entitásokat itt **nem** oldja fel (azt a `decode_payload()` teszi dekódolás után).
+
+### `parse_rtfhead(data, charset=None)`
+Az RTF dekódolásához használandó kódlap.
+
+- `data`: `bytes` – az RTF (csak az első 4 KB-ban keresi a `\ansicpgNNNN`-t); `charset`: `str | None` – tartalék (MIME charset, ill. TNEF internet codepage).
+- **Visszatérés:** `str` – sorrendben az első használható: `cpNNNN` az `\ansicpg` szerint, `charset`, végül `cp1252`.
+  Csak létező **és ASCII-kompatibilis** kódlapot ad vissza (a próba: `{\rtf1 +x-}` változatlanul dekódolódik-e),
+  így pl. az `utf-16*`, `utf-32*`, `utf-7` kiesik – az RTF 7 bites, a kódlap csak a nyers 8 bites bájtokhoz és a
+  striprtf-nek (a `\fcharset` nélküli / ismeretlen `\fcharset`-ű fontok `\'xx` escape-jeihez) kell.
+  Explicit `\ansicpg65001` esetén `cp65001`-et ad (nem `utf-8`-at), amit az `rtf_hex_encoding()` megkülönböztet.
+
+### `rtf_hex_encoding(cp)`
+A `parse_rtfhead()` kódlapjából a `\'xx` escape-ekhez átadandó kódlap: az RTF szerint ezek egybájtos ANSI
+kódlapban vannak, ezért a MIME / TNEF charsetből jövő `utf-8` helyett `cp1252` (a striprtf alapértelmezése);
+minden más (az explicit `\ansicpg65001` → `cp65001` is) változatlan.
+
+### `rtf_to_text_safe(text, encoding="cp1252")`
+RTF (`str`) → szöveg (`str`). Ha a striprtf elérhető, `rtf_to_text(text, encoding=encoding, errors="ignore")`;
+ha nincs telepítve vagy **bármilyen kivételt** dob (pl. a striprtf `charset_map`-jében nem létező codec, hibás
+szerkezet), az `rtf_fallback_text()` eredményét adja. Soha nem dob kivételt a striprtf miatt, így egy hibás
+RTF csatolmány nem szakítja meg a levél feldolgozását.
+
+### `rtf_fallback_text(text, encoding="cp1252")`
+Beépített, függőség nélküli, egymenetes RTF → szöveg kinyerő (tartalék a striprtf helyett).
+
+- A tokeneket (`rtf_token_re`: vezérlőszó, `\'xx`, szimbólum, `{`/`}`, sima szöveg) sorra illeszti, a csoportok
+  állapotát (rejtett-e, `\ucN`, aktuális font) veremben tartja.
+- Kihagyja a `\*`-gal kezdődő csoportokat és az `rtf_skip_groups` csoportjait (font-, szín-, stílus- és
+  listatáblák, `\info`, kép, objektum, fejléc/lábléc, mezőkód, `\shprslt`, alakzat-tulajdonságok).
+  A `\*\shpinst` és `\*\do` (szövegdobozok, régi rajzobjektumok) szövege bekerül, a `\shprslt`-másolat nem.
+- A `\'xx` escape-eket az aktuális font `\fcharset`-je (`rtf_font_codepages()`), ennek hiányában az `encoding`
+  szerint dekódolja (az egymás utáni bájtokat együtt, így a többbájtos kódlapok is működnek); a `\uN` → Unicode
+  karakter, a `\ucN` szerinti helyettesítő karakterek kimaradnak.
+- `\par`, `\line`, `\row`… → sortörés, `\tab`, `\cell` → tab, a nevesített írásjelek (`\emdash`,
+  `\lquote`…) és szimbólumok (`\~`, `\_`, `\{`…) karakterré alakulnak, minden más vezérlőszó kimarad.
+- `\binN` után pontosan N karaktert átugrik (a bináris adatban kapcsos zárójel is lehet).
+- A striprtf-fel ellentétben a **lábjegyzeteket megtartja**; táblázatot nem formáz, a hiperlinkeket nem
+  írja ki `szöveg(url)` alakban. Valós RTF-mintán a striprtf kimenetének szavait (a lábjegyzeteken kívül)
+  jellemzően teljesen visszaadja, kb. 4-5× gyorsabban.
+
+### `rtf_font_codepages(text)`
+A `{\fonttbl ...}` csoportból a fontok kódlapja: `dict[str, str]`, pl. `{'0': 'cp1250', '1': 'cp1251'}`
+(`\fcharsetN` az `rtf_fcharset_cp` szerint; az ott nem szereplő, pl. `1` = default, `2` = symbol fontok
+kimaradnak, azokra a dokumentum kódlapja érvényes).
 
 ### `parse_htmlhead(data, charset=None)`
 A HTML `<head>` részből kiszedi a `<meta ... charset=...>` értéket.

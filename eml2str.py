@@ -268,6 +268,99 @@ def rtf_hex_encoding(cp):
   # default-ja). Az RTF-ben explicit \ansicpg65001 a parse_rtfhead()-tol "cp65001"-kent jon, az marad.
   return "cp1252" if cp.lower() in ("utf-8","utf8") else cp
 
+# a durva RTF szoveg-kinyero tokenjei: \szo[szam], \'xx, \X (escape / szimbolum), { }, sima szoveg, sorvege
+rtf_token_re=re.compile(r"\\([a-zA-Z]{1,32})(-?\d{1,10})? ?|\\'([0-9a-fA-F]{2})|\\(.)|([{}])|([^\\{}\r\n]+)|[\r\n]+",re.S)
+# csoportok, amiknek a tartalma nem szoveg (a \* -gal jelolteken kivul)
+rtf_skip_groups={'fonttbl','colortbl','stylesheet','info','pict','object','objdata','header','headerl','headerr',
+    'headerf','footer','footerl','footerr','footerf','listtable','listoverridetable','rsidtbl','generator',
+    'themedata','colorschememapping','datastore','latentstyles','xmlnstbl','fldinst','shprslt','sp','sn','sv'}
+# \* -os csoportok, amiknek a szovege a dokumentum resze: szovegdobozok ({\shp{\*\shpinst ...{\shptxt ...}}})
+# es regi rajzobjektumok ({\*\do ...{\dptxbxtext ...}}); a \shprslt masolatot (ugyanaz a szoveg) kihagyjuk
+rtf_transparent_groups={'shpinst','do'}
+# \fcharsetN -> kodlap a fontonkenti \'xx dekodolashoz (a tobbi, pl. 1 = default, 2 = symbol: a dokumentum kodlapja)
+rtf_fcharset_cp={0:'cp1252',77:'mac-roman',128:'cp932',129:'cp949',130:'johab',134:'gbk',136:'big5',161:'cp1253',
+    162:'cp1254',163:'cp1258',177:'cp1255',178:'cp1256',186:'cp1257',204:'cp1251',222:'cp874',238:'cp1250',
+    254:'cp437',255:'cp850'}
+rtf_font_re=re.compile(r"\\f(\d+)(?![0-9])")
+# nevesitett irasjelek es szokozok (ha eldobnank, a szomszedos szavak osszetapadnanak)
+rtf_special_words={'par':'\n','line':'\n','row':'\n','sect':'\n','page':'\n','tab':'\t','cell':'\t',
+    'emdash':'\u2014','endash':'\u2013','bullet':'\u2022','lquote':'\u2018','rquote':'\u2019',
+    'ldblquote':'\u201c','rdblquote':'\u201d','emspace':' ','enspace':' ','qmspace':' '}
+rtf_special_syms={'\\':'\\','{':'{','}':'}','~':'\xa0','_':'-','\r':'\n','\n':'\n'}  # a \- (felteteles kotojel) eldobando
+
+def rtf_font_codepages(text):
+  # {\fonttbl{\f0\froman\fcharset238 Times New Roman;}...} -> {'0':'cp1250',...}
+  m=re.search(r"\{\\fonttbl",text)
+  if not m: return {}
+  depth=0; end=len(text)
+  for b in re.finditer(r"\\[\\{}]|[{}]",text[m.start():m.start()+1000000]):
+    if b.group()=='{': depth+=1
+    elif b.group()=='}':
+      depth-=1
+      if depth==0: end=m.start()+b.end(); break
+  tbl=text[m.start():end]; fonts={}
+  starts=list(rtf_font_re.finditer(tbl))
+  for i,f in enumerate(starts):
+    seg=tbl[f.end():starts[i+1].start() if i+1<len(starts) else len(tbl)]
+    c=re.search(r"\\fcharset(\d+)",seg)
+    if c and int(c.group(1)) in rtf_fcharset_cp: fonts[f.group(1)]=rtf_fcharset_cp[int(c.group(1))]
+  return fonts
+
+def rtf_fallback_text(text,encoding="cp1252"):
+  # durva RTF -> szoveg, ha a striprtf nincs telepitve vagy kivetelt dob: a nem-szoveg csoportokat kihagyja,
+  # a \'xx escape-eket a font \fcharset-je (ha nincs: az encoding) szerint, a \uN-eket unicode-kent dekodolja,
+  # a vezerloszavakat eldobja. A lablegyzeteket (a striprtf-fel ellentetben) megtartja.
+  fonts=rtf_font_codepages(text)
+  out=[]; hexes=[]; skip=False; stack=[]; group_start=False; star=False; ucskip=1; curskip=0
+  font=deff=None
+  pos=0; n=len(text)
+  while pos<n:
+    m=rtf_token_re.match(text,pos)
+    if not m: break  # pl. a text vegen egy magaban allo backslash
+    pos=m.end()
+    word,arg,hx,sym,brace,txt=m.groups()
+    if hexes and not hx:
+      out.append(bytes.fromhex(''.join(hexes)).decode(fonts.get(font,encoding),'ignore')); hexes=[]
+    after_star,star=star,False
+    if brace=='{':
+      stack.append((skip,ucskip,font)); group_start=True; continue
+    if brace=='}':
+      if stack: skip,ucskip,font=stack.pop()
+      group_start=False; continue
+    first,group_start=group_start,False
+    if word:
+      if word=='bin' and arg:
+        pos+=max(0,int(arg)); continue  # \binN: N byte binaris adat (barmi lehet benne, kapcsos zarojel is)
+      if after_star and word in rtf_transparent_groups:
+        skip=stack[-1][0] if stack else False  # a \* visszavonasa: csak akkor rejtett, ha a szulo csoport is az
+      elif first and word in rtf_skip_groups: skip=True
+      elif word=='f' and arg: font=arg
+      elif word=='deff' and arg: deff=font=arg
+      elif word=='plain': font=deff
+      elif skip: pass
+      elif word in rtf_special_words: out.append(rtf_special_words[word])
+      elif word=='uc' and arg: ucskip=int(arg)
+      elif word=='u' and arg:
+        c=int(arg); out.append(chr(c+0x10000 if c<0 else c)); curskip=ucskip
+    elif sym:
+      if sym=='*' and first: skip=True; star=True; group_start=True  # a kovetkezo szo meg a csoport "elso" szava
+      elif not skip and sym in rtf_special_syms: out.append(rtf_special_syms[sym])
+    elif hx:
+      if curskip: curskip-=1
+      elif not skip: hexes.append(hx)
+    elif txt and not skip:
+      if curskip: txt=txt[curskip:]; curskip=0
+      out.append(txt)
+  if hexes: out.append(bytes.fromhex(''.join(hexes)).decode(fonts.get(font,encoding),'ignore'))
+  return ''.join(out)
+
+def rtf_to_text_safe(text,encoding="cp1252"):
+  # striprtf, ha van es nem dob kivetelt (pl. nem letezo codec, lezaratlan csoport...), kulonben a durva kinyero
+  if rtf_support:
+    try: return rtf_to_text(text,encoding=encoding,errors="ignore")
+    except Exception: pass
+  return rtf_fallback_text(text,encoding)
+
 
 def parse_htmlhead(data,charset=None):
   for ret in data.split(b'<'):
@@ -525,11 +618,11 @@ def decode_payload(data,ctyp="text/html",charset=None):
         if tnefobj and tnefobj['htmlbody']:
             data=html2text(tnefobj['htmlbody'].encode("utf-8"))   # a tnef_mini mar dekodolta (str)
             charset="utf-8"
-        elif tnefobj and tnefobj['rtfbody'] and rtf_support:
+        elif tnefobj and tnefobj['rtfbody']:
             try:
                 cp=parse_rtfhead(tnefobj['rtfbody'],tnefobj['codepage'])
                 rtf_text=tnefobj['rtfbody'].decode(cp,"mixed")
-                data=rtf_to_text(rtf_text,encoding=rtf_hex_encoding(cp),errors="ignore").encode("utf-8")
+                data=rtf_to_text_safe(rtf_text,rtf_hex_encoding(cp)).encode("utf-8")  # striprtf, vagy ha az nincs / hibazik, a durva kinyero
                 charset="utf-8"
             except Exception:
                 pass  # marad az eredeti (nyers tnef) data, legalabb nem hasal el
@@ -561,7 +654,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":
-        data=rtf_to_text(data,encoding=rtf_hex_encoding(charset),errors="ignore") # remove RTF markup
+        data=rtf_to_text_safe(data,rtf_hex_encoding(charset)) # remove RTF markup (striprtf, ha hibazik: durva kinyero)
     else:
         data=unescape(data)  # fix &gt; etc
 
@@ -591,7 +684,7 @@ def eml2str(msg,ds2=False):
     charset=p["charset"]
     fnev=p["name"]
 #    print((ctyp,charset,disp,fnev))
-    if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support):
+    if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or ctyp=="application/rtf":
         data=p["payload"]
         data=decode_payload(data,ctyp,charset)
 #        if not text or len(data)>20: text=data # a kesobbi szoveg vszinu jobb (html>text, delivery hibak utan csatolva az eredeti level, elol a spamassassin fejlece stb)
@@ -619,7 +712,7 @@ def get_mimedata(eml):
         html=None
         if pay:
             s+="%d"%(len(pay))
-            if ctyp.startswith("text/") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or (ctyp=="application/rtf" and rtf_support) or ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            if ctyp.startswith("text/") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or ctyp=="application/rtf" or ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 html=decode_payload(pay,ctyp,cset) # ez meg a prettify elott kell, mert az elbassza a whitespacet...
                 if ctyp=="text/html" or ctyp=="text/xml":
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
