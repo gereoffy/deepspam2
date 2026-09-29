@@ -13,7 +13,7 @@ destinations = frozenset((
     'atnparent','atnref','atntime','atrfend','atrfstart','author','background',
     'bkmkend','bkmkstart','blipuid','buptim','category','colorschememapping',
     'colortbl','comment','company','creatim','datafield','datastore','defchp','defpap',
-    'do','doccomm','docvar','dptxbxtext','ebcend','ebcstart','factoidname','falt',
+    'doccomm','docvar','ebcend','ebcstart','factoidname','falt',
     'fchars','ffdeftext','ffentrymcr','ffexitmcr','ffformat','ffhelptext','ffl',
     'ffname','ffstattext','file','filetbl','fldinst','fldtype','fonttbl',
     'fname','fontemb','fontfile','footer','footerf','footerl','footerr',
@@ -43,14 +43,20 @@ destinations = frozenset((
     'oldpprops','oldsprops','oldtprops','oleclsid','operator','panose','password',
     'passwordhash','pgp','pgptbl','picprop','pict','pn','pnseclvl','pntext','pntxta',
     'pntxtb','printim','private','propname','protend','protstart','protusertbl','pxe',
-    'result','revtbl','revtim','rsidtbl','rxe','shp','shpgrp','shpinst',
-    'shppict','shprslt','shptxt','sn','sp','staticval','stylesheet','subject','sv',
+    'result','revtbl','revtim','rsidtbl','rxe',
+    'shppict','shprslt','sn','sp','staticval','stylesheet','subject','sv',
     'svb','tc','template','themedata','title','txe','ud','upr','userprops',
     'wgrffmtfilter','windowcaption','writereservation','writereservhash','xe','xform',
     'xmlattrname','xmlattrvalue','xmlclose','xmlname','xmlnstbl',
     'xmlopen',
 ))
 # fmt: on
+# \* destinations whose text is part of the document: the text of text boxes and other
+# shapes ({\shp{\*\shpinst ...{\shptxt ...}}}) and of old style drawing objects
+# ({\*\do ...{\dptxbxtext ...}}). Inside them the shape properties (\sp, \sn, \sv)
+# are still ignored, and so is \shprslt, the copy of the shape for readers that do
+# not understand shapes (it would duplicate the text box text).
+transparent_destinations = frozenset(('shpinst', 'do'))
 charset_map = {
     0: "cp1252",  # Default
     42: "cp1252",  # Symbol
@@ -128,52 +134,55 @@ HYPERLINKS = re.compile(
 )
 
 
+PICT = re.compile(r"\\pict(?![a-zA-Z])")
+# inside a \pict group: \binN (N bytes of binary data follow after the optional space),
+# escaped characters and braces
+PICT_TOKEN = re.compile(r"\\bin(\d+) ?|\\[\\{}]|[{}]")
+
+
+def _pict_group_end(rtf_text, i):
+    """
+    Return the position of the brace closing the \\pict group whose content starts
+    at ``i`` (or the length of the text if the group is not closed). The group can
+    contain nested groups (e.g. ``{\\*\\blipuid ...}``) and binary data (``\\binN``),
+    which is N bytes of any value, braces too.
+    """
+    depth = 0
+    while True:
+        token = PICT_TOKEN.search(rtf_text, i)
+        if not token:
+            return len(rtf_text)
+        if token.group(1) is not None:  # \binN: skip the binary data
+            i = token.end() + int(token.group(1))
+            continue
+        i = token.end()
+        if token.group() == "{":
+            depth += 1
+        elif token.group() == "}":
+            if depth == 0:
+                return token.start()
+            depth -= 1
+
+
 def remove_pict_groups(rtf_text):
     """
-    Remove all \\pict groups with binary data from the RTF text.
+    Remove the content of all \\pict groups if there is binary data in the RTF text.
     If no binary-encoded \\pict groups are found, return the original text.
+    The braces of the \\pict groups are kept, so that the group structure of the
+    document does not change.
     See issue 58
     """
     # Fast check to see if \pict and \bin exist together in the text
     if "\\pict" not in rtf_text or "\\bin" not in rtf_text:
         return rtf_text
-    result = []  # Stores the final RTF text without binary-encoded \pict groups
+    result = []  # Stores the final RTF text without the content of \pict groups
     i = 0
-    n = len(rtf_text)
-    in_pict = False  # Flag to track if we're inside a \pict group
-    binary_length = 0  # Length of binary data to skip
-
-    while i < n:
-        if not in_pict and rtf_text.startswith("\\pict", i):
-            # Start of a \pict group
-            in_pict = True
-            i += len("\\pict")  # Skip the \pict keyword
-            continue
-
-        if in_pict:
-            if rtf_text.startswith("\\bin", i):
-                # Extract the length of binary data
-                i += len("\\bin")
-                length_str = ""
-                while i < n and rtf_text[i].isdigit():
-                    length_str += rtf_text[i]
-                    i += 1
-                binary_length = int(length_str)
-                # Skip the binary data
-                i += binary_length
-                continue
-            elif rtf_text[i] == "}":
-                # End of the \pict group
-                in_pict = False
-                i += 1  # Skip the closing brace
-                continue
-
-        if not in_pict:
-            # Append characters outside \pict groups
-            result.append(rtf_text[i])
-
-        i += 1  # Move to the next character
-
+    for start in PICT.finditer(rtf_text):
+        if start.start() < i:
+            continue  # "\pict" inside the binary data of a skipped \pict group
+        result.append(rtf_text[i : start.start()])
+        i = _pict_group_end(rtf_text, start.end())
+    result.append(rtf_text[i:])
     return "".join(result)
 
 FONTTABLE = re.compile(r"\\f(\d+).*?\\fcharset(\d+).*?([^;]+);")
@@ -237,6 +246,7 @@ def rtf_to_text(text, encoding="cp1252", errors="strict"):
     out = ""
     depth = 0  # Current group nesting level
     in_document = False  # Whether the outer document group has been entered
+    star = False  # Whether the previous token was \*
 
     # Simplified font table regex
     fonttbl_matches = FONTTABLE.findall(font_table_group(text))
@@ -248,6 +258,7 @@ def rtf_to_text(text, encoding="cp1252", errors="strict"):
         }
     for match in PATTERN.finditer(text):
         word, arg, _hex, char, brace, tchar = match.groups()
+        after_star, star = star, False
         if hexes and not _hex:
             # Decode accumulated hexes
             out += bytes.fromhex(hexes).decode(
@@ -288,10 +299,14 @@ def rtf_to_text(text, encoding="cp1252", errors="strict"):
                     out += specialchars[char]
             elif char == "*":
                 ignorable = True
+                star = True
         elif word:  # \foo
             curskip = 0
             if word in destinations:
                 ignorable = True
+            elif after_star and word in transparent_destinations and stack:
+                # undo the \*: the group is ignorable only if the enclosing group is
+                ignorable = stack[-1][1]
             # http://www.biblioscape.com/rtf15_spec.htm#Heading8
             elif word == "ansicpg":
                 encoding = f"cp{arg}"
