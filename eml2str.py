@@ -82,18 +82,18 @@ codec_aliases = {
     'gb_2312':             'gbk',
     'gb_2312-80':          'gbk',
     'x-gbk':               'gbk',
-    'cn-big5':             'big5',
-    'x-x-big5':            'big5',
+    'cn-big5':             'big5hkscs',
+    'x-x-big5':            'big5hkscs',
     'cseucpkdfmtjapanese': 'euc-jp',
     'x-euc-jp':            'euc-jp',
-    'windows-31j':         'shift_jis',
-    'x-sjis':              'shift_jis',
-    'cseuckr':             'euc-kr',
-    'csksc56011987':       'euc-kr',
-    'iso-ir-149':          'euc-kr',
-    'ks_c_5601-1989':      'euc-kr',
-    'ksc_5601':            'euc-kr',
-    'windows-949':         'euc-kr',
+    'windows-31j':         'cp932',
+    'x-sjis':              'cp932',
+    'cseuckr':             'cp949',
+    'csksc56011987':       'cp949',
+    'iso-ir-149':          'cp949',
+    'ks_c_5601-1989':      'cp949',
+    'ksc_5601':            'cp949',
+    'windows-949':         'cp949',
 
     # a striprtf charset_map-jenek nem letezo mac_* codec-nevei (\fcharset77..89); a hebrew / thai kozelites
     'mac_ce':              'mac_latin2',
@@ -149,8 +149,21 @@ charset_overrides = {
     'csiso58gb231280':     'gbk',
     'gb2312':              'gbk',
     'iso-ir-58':           'gbk',
-    'big5-hkscs':          'big5',
-    'ms_kanji':            'shift_jis',
+    # WHATWG: a big5 valojaban Big5-HKSCS, a shift_jis windows-31j (cp932), az euc-kr windows-949 (cp949), ezek bovebbek
+    'big5':                'big5hkscs',
+    'big5-tw':             'big5hkscs',
+    'csbig5':              'big5hkscs',
+    'csshiftjis':          'cp932',
+    'shift-jis':           'cp932',
+    'shift_jis':           'cp932',
+    'sjis':                'cp932',
+    'euc-kr':              'cp949',
+    'euc_kr':              'cp949',
+    'euckr':               'cp949',
+    'korean':              'cp949',
+    'ks_c_5601':           'cp949',
+    'ks_c_5601-1987':      'cp949',
+    'ksc5601':             'cp949',
 }
 
 def charset_name(cset):
@@ -216,6 +229,29 @@ def mixed_decoder(unicode_error):
 
 codecs.register_error("mixed", mixed_decoder)
 
+def safe_decode(data,cs,errors="mixed"):
+    # dekodolas a cs kodlappal; ha az nem letezik vagy nem hasznalhato (LookupError: unknown-8bit, iso-2022-cn, base64...,
+    # UnicodeError: undefined, idna, ami a 'mixed'-et sem tamogatja), akkor utf-8 + mixed (latin1/cp1252 visszaesessel)
+    try: return data.decode(cs or "utf-8",errors)
+    except (LookupError,UnicodeError): return data.decode("utf-8","mixed")
+
+_ASCII_PROBE=b'<body +x- ~~ \x1b$B>'  # utf-7 (+x-), hz (~~), iso-2022 (ESC $ B), utf-16/32 (paratlan hossz) mind elrontja
+
+def ascii_compatible(cs):
+    # az ASCII byte-ok ASCII karaktert jelentenek-e ebben a kodlapban (a html2text byte-okon dolgozik, ehhez kell);
+    # ismeretlen kodlap: igen, mert ugyis utf-8 + mixed lesz belole
+    try: return _ASCII_PROBE.decode(cs)==_ASCII_PROBE.decode("ascii")
+    except LookupError: return True
+    except UnicodeError: return False
+
+def fix_chars(s):
+    # az invalid_charrefs csere a dekodolt szovegen (C1 -> cp1252 irasjelek, Õ Û õ û -> Ő Ű ő ű, nbsp, shy...)
+    return ''.join([invalid_charrefs.get(ord(c),c) for c in s])
+
+# a utf-32-le elobb kell, mint a vele azonosan kezdodo utf-16-le
+BOMS=((codecs.BOM_UTF8,"utf-8"),(codecs.BOM_UTF32_LE,"utf-32-le"),(codecs.BOM_UTF32_BE,"utf-32-be"),
+      (codecs.BOM_UTF16_LE,"utf-16-le"),(codecs.BOM_UTF16_BE,"utf-16-be"))
+
 
 
 # Mely tag-ek mely attributumaban keressuk az URL-t.
@@ -259,7 +295,7 @@ def parse_rtfhead(data,charset=None):
   for cp in ("cp"+m.group(1).decode() if m else None,charset,"cp1252"):
     try:
       if cp and b'{\\rtf1 +x-}'.decode(cp)=='{\\rtf1 +x-}': return cp  # a +x- az utf-7 miatt
-    except (LookupError,UnicodeDecodeError): pass
+    except (LookupError,UnicodeError): pass
   return "cp1252"
 
 def rtf_hex_encoding(cp):
@@ -375,17 +411,17 @@ def parse_htmlhead(data,charset=None):
       p=tag.find(b'charset=')
       if p>=0:
 #        print(tag)
-        charset=""
+        cs=""
         for c in tag[p+8:]:
           if c<=32: continue  # whitespace
           if c==34 or c==39:  # idezojelek
-            if charset: break
+            if cs: break
             continue
           if not c in b'_-0123456789abcdefghijklmnopqrstuvwxyz': break
-          charset+=chr(c)
-#        print('CHARSET='+charset)
-        if charset: break
-  return charset
+          cs+=chr(c)
+#        print('CHARSET='+cs)
+        if cs: return cs
+  return charset  # nincs, vagy ures / sablonos (charset="{{cs}}"): marad a MIME charset
 
 
 # a tag-bol kiparsoljuk a tag nevet, es hogy milyen:  -1=endtag 0=selfclosing 1=nyito
@@ -612,6 +648,10 @@ def is_utf8(s):
 
 def decode_payload(data,ctyp="text/html",charset=None):
 
+    bom=False
+    for b,cs in BOMS:  # BOM eseten az donti el a kodlapot (mint a bongeszokben), magat a BOM-ot levagjuk
+        if data.startswith(b): data=data[len(b):]; charset=cs; bom=True; break
+
     ldata=data.lower()
     if ctyp=="text/calendar" or ctyp=="application/ics":
         data=parse_ics(data)
@@ -634,9 +674,9 @@ def decode_payload(data,ctyp="text/html",charset=None):
                 pass  # marad az eredeti (nyers tnef) data, legalabb nem hasal el
     elif ctyp=="text/html" or ctyp=="text/xml" or ((ctyp!="text/plain" or b'</head>' in ldata or b'</br>' in ldata) and b'<' in ldata and (ldata.find(b'<body')>=0 or ldata.find(b'<img ')>=0 or ldata.find(b'<style')>=0 or ldata.find(b'<br>')>=0 or ldata.find(b'<center>')>=0 or ldata.find(b'<a href')>=0)):
         p=ldata.find(b'<body')
-        if p>0: charset=parse_htmlhead(data[:p],charset) # parse charset override from <head>
-        if charset and (charset.startswith("iso-2022") or charset.startswith("csiso2022")):  # https://en.wikipedia.org/wiki/ISO/IEC_2022
-            data=data.decode(charset,errors="ignore").encode("utf-8")  # japan/koreai, 7 bitbe kodolt tobb byteos karakterkodok, ESC-el stb, a html parser nem birja :)
+        if p>0 and not bom: charset=parse_htmlhead(data[:p],charset) # parse charset override from <head> (BOM eseten az dont)
+        if charset and not ascii_compatible(charset_name(charset)):  # iso-2022-* (japan/koreai, 7 bites, ESC-el), utf-16/32, utf-7, hz: a html parser nem birja :)
+            data=safe_decode(data,charset_name(charset),"ignore").encode("utf-8")
             charset="utf-8"
         data=html2text(data)     # binary version!
 
@@ -644,19 +684,15 @@ def decode_payload(data,ctyp="text/html",charset=None):
     if ctyp=="application/rtf":
       charset=parse_rtfhead(data,charset)  # az RTF sajat \ansicpg-je elsobbseget kap a MIME charset-tel szemben
 
-    if charset=="utf-8" or is_utf8(data):
+    if charset=="utf-8" or (not bom and is_utf8(data)):
         # Try UTF-8:
         try:
             data=data.decode("utf-8", 'strict')
         except UnicodeDecodeError as e:
 #            print('BAD_UTF8, CHARSET='+charset) #, repr(e))
-            data=data.decode(charset, 'mixed')  # exceptiont dob ha nincs ilyen charset!
+            data=safe_decode(data,charset)
     else:
-        try:
-            data=data.decode(charset, 'mixed')
-        except LookupError: # nincs 'charset' nevu kodlap:
-#            print('BAD_CHARSET='+charset)
-            data=data.decode("utf-8", 'mixed') # lehet inkabb latin2 kene eleve?
+        data=safe_decode(data,charset)  # ismeretlen / hasznalhatatlan kodlap eseten utf-8 + mixed
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":
@@ -664,7 +700,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     else:
         data=unescape(data)  # fix &gt; etc
 
-    return ''.join([invalid_charrefs.get(ord(c),c) for c in data])
+    return fix_chars(data)
 
 
 def eml2str(msg,ds2=False):
@@ -1048,8 +1084,9 @@ def hdrdecode4(h):
             cenc=parts.pop(0)
 #            print((cset,cfmt,cenc))
             try:
-                if cfmt=='q': cdec=a2b_qp(cenc.replace("==","="), header=True) # lehets=C3==A9ges
-                else: cdec=a2b_base64(cenc+"===")
+                # bytes-kent, mert az encoded-word-on beluli nyers 8 bites resz str-kent ValueError-t dobna
+                if cfmt=='q': cdec=a2b_qp(cenc.replace("==","=").encode("utf-8"), header=True) # lehets=C3==A9ges
+                else: cdec=a2b_base64(cenc.encode("utf-8")+b"===")
                 # EVIL workaround: some utf8 strings are splitted in the middle of an utf8 character...
                 if strips and strips[-1][1]==cset: #    try to concatenate these parts before decoding!
                     strips[-1][0]+=cdec
@@ -1057,11 +1094,8 @@ def hdrdecode4(h):
                     strips.append([cdec,cset])
             except Exception as e:
                 print(repr(e),cfmt,repr(cenc))
-    def dec(x):
-        if x[1]==None: return x[0]
-        try: return x[0].decode(charset_name(x[1]) or "utf-8","mixed")
-        except LookupError: return x[0].decode("utf-8","mixed") # ismeretlen charset nev a fejlecben
-    return "".join(dec(x) for x in strips)
+                strips.append([cenc,None])  # ne vesszen el, nyersen marad
+    return fix_chars("".join(x[0] if x[1] is None else safe_decode(x[0],charset_name(x[1])) for x in strips))
 
 
 # RFC 2231 parameter value continuations/encoding:  filename*=UTF-8''sz%C3%A1mla.pdf
@@ -1085,8 +1119,7 @@ def rfc2231_decode(ct,key):
                 cset=cs.decode("us-ascii","ignore").lower() or 'us-ascii'
             v=unquote_to_bytes(v)
         raw+=v
-    try: return raw.decode(charset_name(cset),"mixed")
-    except LookupError: return raw.decode("utf-8","mixed")
+    return fix_chars(safe_decode(raw,charset_name(cset)))
 
 # decoded parameter value from parse_ctyp() dict: RFC 2231 (key*=...) preferred, then RFC 2047 (key=...)
 def ct_param(ct,key):
