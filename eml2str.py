@@ -13,13 +13,13 @@ from html import unescape  #  https://docs.python.org/3/library/html.html
 try:
   from striprtf import rtf_to_text
   rtf_support=True
-except:
+except ImportError:
   rtf_support=False
 
 try:
   from tnef_mini import parse_tnef_body
   tnef_support=True
-except:
+except ImportError:
   tnef_support=False
 
 # Karakterkeszlet-nevek, amiket a Python nem ismer, de levelekben / HTML-ben / RTF-ben elofordulnak.
@@ -569,13 +569,13 @@ def parse_ics(data):
 def parse_docx(data):   # if ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document" or fnev.endswith(".docx"):
     try:
         zipf=zipfile.ZipFile(io.BytesIO(data))
-        xml=zipf.read('word/document.xml') #.decode("utf-8")
+        xml=zipf.open('word/document.xml').read(8*1024*1024)  # zip bomba ellen: a deklaralt merettol fuggetlenul max ennyi byte
         s=b''
         for ret in xml.split(b'<'):
             try:
                 tag,txt=ret.split(b'>',1)
                 tag1=tag.split()[0]
-            except:
+            except (ValueError,IndexError):  # nincs '>' / ures tag
                 continue
             if tag1==b'w:t':
                 s+=txt
@@ -676,7 +676,7 @@ def eml2str(msg,ds2=False):
       try:
         hh=h.split(b':',1)
         if hh[0].lower()==b'subject': subject=remove_spamtag(hdrdecode4(hh[1]))
-      except: pass
+      except Exception: pass
 
   def walk(eml):
     if eml["parts"]:
@@ -840,7 +840,7 @@ def parse_ctyp(data,hdr=b'_',ct=None):
       elif eqsn:  #  after the = character -> value
         # " barhol idezojel, de ' csak az ertek elejen (nem szabvanyos, de elofordul), kulonben
         # elrontana az O'Brien.pdf es az RFC 2231 filename*=UTF-8''... ertekeket (ott soha nem idezojel)
-        if c==34 or (c==39 and not value and name[-1]!=42): ijel=c
+        if c==34 or (c==39 and not value and name and name[-1]!=42): ijel=c
         elif value or c>32: value.append(c)  # skip initial WS
       else:     #  before the = character -> name
         if c==61: eqsn=True #  =
@@ -908,7 +908,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     try:
         name=ct_param(ct,b'filename')
         if name is None: name=ct_param(ct,b'name')
-    except: name="EXC!" # hdrdecode4 my fail for wrong codepage
+    except Exception as e: name="EXC!"; print("FilenameExc:",repr(e)) # hdrdecode4 may fail for wrong codepage
     eml={"headers":headers, "raw":(p,pend), "size":pend-p, "hsize":hsize-p, "ct":ct, "ctyp":ctyp or 'text/plain', "charset":cset, "encoding":cenc, "disp":disp, "name":name, "parts":[]}
 
 #    if b'name' in ct: print("FNAME:",hdrdecode4(ct[b'name']))
