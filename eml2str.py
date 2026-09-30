@@ -354,12 +354,18 @@ def rtf_fallback_text(text,encoding="cp1252"):
   if hexes: out.append(bytes.fromhex(''.join(hexes)).decode(fonts.get(font,encoding),'ignore'))
   return ''.join(out)
 
+def fix_surrogates(s):
+  # a \uN parokbol (emoji) kulon chr()-rel keletkezett surrogate-ok osszevonasa, a parositatlanok U+FFFD-re,
+  # kulonben a kesobbi .encode("utf-8") kivetelt dob
+  try: s.encode("utf-8"); return s
+  except UnicodeEncodeError: return s.encode("utf-16-le","surrogatepass").decode("utf-16-le","replace")
+
 def rtf_to_text_safe(text,encoding="cp1252"):
   # striprtf, ha van es nem dob kivetelt (pl. nem letezo codec, lezaratlan csoport...), kulonben a durva kinyero
   if rtf_support:
-    try: return rtf_to_text(text,encoding=encoding,errors="ignore")
+    try: return fix_surrogates(rtf_to_text(text,encoding=encoding,errors="ignore"))
     except Exception: pass
-  return rtf_fallback_text(text,encoding)
+  return fix_surrogates(rtf_fallback_text(text,encoding))
 
 
 def parse_htmlhead(data,charset=None):
@@ -846,7 +852,7 @@ def parse_ctyp(data,hdr=b'_',ct=None):
 # https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
 def decode_body(data,encoding,binary=True):
     try:
-        if encoding=='base64': return a2b_base64(data)
+        if encoding=='base64': return a2b_base64(data+b'===')  # hianyzo padding potlasa (a tobblet nem zavar)
 #        if encoding=='quoted-printable': return a2b_qp(data)
         if encoding in ['quoted-printable','utf8','utf-8']:
             if binary: data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')   # str-nel ugyanez '\r\n' /
@@ -881,7 +887,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
         if hdr: headers.append(hdr)
         hdr=line
         if len(line)==0: break
-#    if hdr: print("HeaderParseErr:",hdr)
+    if hdr: headers.append(hdr)  # nincs ures sor a fejlec utan (hsize==pend): az utolso fejlec is kell
 
     # parse Content-*: headers (get type/encoding/charset/filename)
     ct={}
@@ -1037,7 +1043,7 @@ def hdrdecode4(h):
         textpart=parts.pop(0)
         if textpart and not textpart.isspace(): strips.append([textpart,None]) # ignore spaces between encoded parts!
         if parts:
-            cset=parts.pop(0).lower()
+            cset=parts.pop(0).lower().split('*')[0] # RFC 2231 nyelvjelolo levagasa:  =?UTF-8*hu?Q?...?=
             cfmt=parts.pop(0).lower() # csak q es b lehet!
             cenc=parts.pop(0)
 #            print((cset,cfmt,cenc))
@@ -1051,7 +1057,11 @@ def hdrdecode4(h):
                     strips.append([cdec,cset])
             except Exception as e:
                 print(repr(e),cfmt,repr(cenc))
-    return "".join(x[0] if x[1]==None else x[0].decode(charset_name(x[1]) or "utf-8","mixed") for x in strips)
+    def dec(x):
+        if x[1]==None: return x[0]
+        try: return x[0].decode(charset_name(x[1]) or "utf-8","mixed")
+        except LookupError: return x[0].decode("utf-8","mixed") # ismeretlen charset nev a fejlecben
+    return "".join(dec(x) for x in strips)
 
 
 # RFC 2231 parameter value continuations/encoding:  filename*=UTF-8''sz%C3%A1mla.pdf
