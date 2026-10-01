@@ -684,15 +684,10 @@ def decode_payload(data,ctyp="text/html",charset=None):
     if ctyp=="application/rtf":
       charset=parse_rtfhead(data,charset)  # az RTF sajat \ansicpg-je elsobbseget kap a MIME charset-tel szemben
 
-    if charset=="utf-8" or (not bom and is_utf8(data)):
-        # Try UTF-8:
-        try:
-            data=data.decode("utf-8", 'strict')
-        except UnicodeDecodeError as e:
-#            print('BAD_UTF8, CHARSET='+charset) #, repr(e))
-            data=safe_decode(data,charset)
-    else:
-        data=safe_decode(data,charset)  # ismeretlen / hasznalhatatlan kodlap eseten utf-8 + mixed
+    # elobb strict utf-8 (gyakran utf-8 a szoveg mas charset cimkevel), ha nem az: a deklaralt kodlap mixed modban.
+    # Nem ASCII-kompatibilis kodlapnal (utf-16/32, utf-7, iso-2022-jp, hz) nincs utf-8 proba, ott a 7 bites byte-sor tevesen atmenne
+    try: data=data.decode("utf-8","strict") if ascii_compatible(charset) else safe_decode(data,charset)
+    except UnicodeDecodeError: data=safe_decode(data,charset)  # ismeretlen / hasznalhatatlan kodlap eseten utf-8 + mixed
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":
