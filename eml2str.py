@@ -4,6 +4,7 @@ import codecs
 import encodings
 import re
 import zipfile
+from itertools import islice
 
 from binascii import a2b_qp,a2b_base64
 from urllib.parse import unquote_to_bytes
@@ -186,7 +187,7 @@ invalid_charrefs = {
     0x89: '\u2030',  # PER MILLE SIGN
     0x8a: '\u0160',  # LATIN CAPITAL LETTER S WITH CARON
     0x8b: '\u2039',  # SINGLE LEFT-POINTING ANGLE QUOTATION MARK
-    0x8c: '\u0152',  # LATIN CAPITAL LIGATURE OE
+    0x8c: '\u015a',  # CP1250-bol (cp1252: CAPITAL LIGATURE OE)
     0x8d: '\u0164',  # CP1250-bol :)
     0x8e: '\u017d',  # LATIN CAPITAL LETTER Z WITH CARON
     0x8f: '\u0179',  # CP1250-bol :)
@@ -202,10 +203,10 @@ invalid_charrefs = {
     0x99: '\u2122',  # TRADE MARK SIGN
     0x9a: '\u0161',  # LATIN SMALL LETTER S WITH CARON
     0x9b: '\u203a',  # SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
-    0x9c: '\u0153',  # LATIN SMALL LIGATURE OE
+    0x9c: '\u015b',  # CP1250-bol (cp1252: SMALL LIGATURE OE)
     0x9d: '\u0165',  # CP1250-bol :)
     0x9e: '\u017e',  # LATIN SMALL LETTER Z WITH CARON
-    0x9f: '\u0178',  # LATIN CAPITAL LETTER Y WITH DIAERESIS
+    0x9f: '\u017a',  # CP1250-bol (cp1252: CAPITAL LETTER Y WITH DIAERESIS)
     0xA0: ' ',       # &nbsp Unicode Character 'NO-BREAK SPACE' (U+00A0)
     0xAD: '',        # &shy SOFT HYPHEN  https://stackoverflow.com/questions/34835786/what-is-shy-and-how-do-i-get-rid-of-it
     # csak ezek ternek el a magyar abc-ben a latin1 es latin2 kozott, inkabb a latin2-eset hasznaljuk ezekbol:
@@ -229,10 +230,27 @@ def mixed_decoder(unicode_error):
 
 codecs.register_error("mixed", mixed_decoder)
 
+def _mixed_factory(cs):
+    # mint a mixed, de a felso fel (A0..FF) a megadott kodlap szerint (latin2 / cp1250), a 80..9F marad az invalid_charrefs
+    tbl=bytes(range(0xa0,0x100)).decode(cs)
+    def handler(e):
+        b=e.object[e.start]
+        return (tbl[b-0xa0] if b>=0xa0 else invalid_charrefs.get(b,chr(b)), e.start+1)
+    return handler
+for _cs in ("iso8859-2","cp1250"): codecs.register_error("mixed_"+_cs,_mixed_factory(_cs))
+
 def safe_decode(data,cs,errors="mixed"):
     # dekodolas a cs kodlappal; ha az nem letezik vagy nem hasznalhato (LookupError: unknown-8bit, iso-2022-cn, base64...,
-    # UnicodeError: undefined, idna, ami a 'mixed'-et sem tamogatja), akkor utf-8 + mixed (latin1/cp1252 visszaesessel)
-    try: return data.decode(cs or "utf-8",errors)
+    # UnicodeError: undefined, idna, ami a 'mixed'-et sem tamogatja), akkor utf-8 + mixed (latin1/cp1252 visszaesessel).
+    # Latin1/2 kodlapnal, ha utf-8 magyar ekezetek vannak benne (is_utf8_mixed), hibaturo utf-8, ahol az ervenytelen
+    # byte-ok a megadott kodlap szerint dekodolodnak (pl. levelezolista footer, idezett utf-8 resz)
+    try:
+        cs=codecs.lookup(cs or "utf-8").name
+        if cs in ["cp1252","iso8859-1","iso8859-2","cp1250"]: # latin1/2 kanonikus nevei (a charset_name utan a latin1/us-ascii mar cp1252)
+            try: return data.decode("utf-8","strict")  # gyakran utf-8 a latin1/2-nek jelolt szoveg (rovid fejlecekben is)
+            except UnicodeDecodeError: pass
+            if is_utf8_mixed(data): return data.decode("utf-8","mixed_"+cs if cs in ("iso8859-2","cp1250") else "mixed")
+        return data.decode(cs,errors)
     except (LookupError,UnicodeError): return data.decode("utf-8","mixed")
 
 _ASCII_PROBE=b'<body +x- ~~ \x1b$B>'  # utf-7 (+x-), hz (~~), iso-2022 (ESC $ B), utf-16/32 (paratlan hossz) mind elrontja
@@ -252,6 +270,13 @@ def fix_chars(s):
 BOMS=((codecs.BOM_UTF8,"utf-8"),(codecs.BOM_UTF32_LE,"utf-32-le"),(codecs.BOM_UTF32_BE,"utf-32-be"),
       (codecs.BOM_UTF16_LE,"utf-16-le"),(codecs.BOM_UTF16_BE,"utf-16-be"))
 
+
+_HU_U8=re.compile(rb'\xc3[\x81\x89\x8d\x93\x96\x9a\x9c\xa1\xa9\xad\xb3\xb6\xba\xbc]|\xc5[\x90\x91\xb0\xb1]')  # utf-8 ÁÉÍÓÖÚÜ áéíóöúü Őő Űű
+
+def is_utf8_mixed(data,n=4):
+    # van-e legalabb n db utf-8 kodolt magyar ekezetes betu (csak latin1/2 deklaralt kodlapnal hasznaljuk,
+    # mas kodlapoknal tevesen is kijohet: gbk "好。" = C3 A1, euc-kr 처 = C3 B3, cp1251 "Гі" = C3 B3)
+    return sum(1 for _ in islice(_HU_U8.finditer(data),n))>=n
 
 
 # Mely tag-ek mely attributumaban keressuk az URL-t.
@@ -687,7 +712,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     # elobb strict utf-8 (gyakran utf-8 a szoveg mas charset cimkevel), ha nem az: a deklaralt kodlap mixed modban.
     # Nem ASCII-kompatibilis kodlapnal (utf-16/32, utf-7, iso-2022-jp, hz) nincs utf-8 proba, ott a 7 bites byte-sor tevesen atmenne
     try: data=data.decode("utf-8","strict") if ascii_compatible(charset) else safe_decode(data,charset)
-    except UnicodeDecodeError: data=safe_decode(data,charset)  # ismeretlen / hasznalhatatlan kodlap eseten utf-8 + mixed
+    except UnicodeDecodeError: data=safe_decode(data,charset)  # latin1/2 + utf-8 keverek, ismeretlen kodlap: lasd safe_decode
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":
