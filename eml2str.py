@@ -1055,18 +1055,21 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     return eml
 
 
-def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
+# calls do_eml(headers,raw) for each email in mbox.  raw is either raw size (if getraw=False) or raw email (hdr+body) in bytes (if getraw=True)
+def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng'],getraw=False):
   eml=None
-  in_hdr=0
+  raw=[]
+  in_hdr=False
   fpos=f.tell()
   for rawline in f:
 
     if in_hdr:
         fpos+=len(rawline)
+        if getraw: raw.append(rawline)
 
         line=rawline.rstrip(b'\r\n') # The chars argument is a string specifying the set of characters to be removed. 
         if len(line)==0: # empty line -> end of the header
-            in_hdr=0
+            in_hdr=False
             eml["_hsize"]=fpos-eml["_fpos"]
         elif line[0] in [9,32]: # starts with tab/space -> header continuation
             hdr+=line # keep whitespace?
@@ -1086,13 +1089,14 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
 
     # in body:
     if rawline[0:5]==b'From ':
-        if eml: do_eml(eml,fpos)
-        in_hdr=1
+        if eml: do_eml(eml,b''.join(raw) if getraw else fpos-eml["_fpos"])
+        in_hdr=True
         hdr=b''
         eml={"_fpos":fpos,"_from":rawline.rstrip(b'\r\n').decode("us-ascii", errors="ignore")}
+        raw=[]
 
     elif not eml: # and (rawline[:10]==b'X-Grey-ng:' or rawline[:9]==b'Received:'):
-        in_hdr=1
+        in_hdr=True
         hdr=rawline.rstrip(b'\r\n')
         eml={"_fpos":fpos}
 
@@ -1100,8 +1104,9 @@ def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng']):
         eml['_attach']=True
 
     fpos+=len(rawline)
+    if getraw: raw.append(rawline)
 
-  if eml: do_eml(eml,fpos)
+  if eml: do_eml(eml,b''.join(raw) if getraw else fpos-eml["_fpos"])
   return fpos # folder file size
 
 

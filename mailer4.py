@@ -36,8 +36,8 @@ mails_text=[]
 mails_deep=[]
 mails_dedup=[]
 
-def do_eml(eml,endpos):
-    eml["_size"]=endpos-eml["_fpos"]
+def do_eml(eml,rawsize):
+    eml["_size"]=rawsize
 #    eml['subject'] = hdrdecode(cleanupspaces(eml.get('subject',b'')))
 #    eml['subject'] = hdrdecode4( " ".join(eml.get('subject','').split()) )
     eml['subject'] = hdrdecode4(eml.get('subject',''))
