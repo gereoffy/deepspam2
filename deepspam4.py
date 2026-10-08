@@ -10,7 +10,14 @@ from io import BytesIO
 
 ############################################################################################################################################
 
-from eml2str import eml2str
+# eml2str: a Rust valtozat (eml2str_rs, lasd eml2str-rs/build_python.sh), ha elerheto, kulonben a tiszta Python.
+import os
+try:
+    from eml2str_rs import eml2str
+    print("eml2str: Rust (eml2str_rs)")
+except ImportError:
+    from eml2str import eml2str
+    print("eml2str: Python")
 
 from model import DeepSpam
 ds=DeepSpam()

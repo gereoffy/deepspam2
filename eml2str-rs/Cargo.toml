@@ -1,0 +1,27 @@
+[package]
+name = "eml2str"
+version = "0.1.0"
+edition = "2021"
+description = "Az eml2str.py (levelbol subject + szoveg kinyerese a DeepSpam-hez) Rust portja"
+
+[lib]
+path = "src/lib.rs"
+# cdylib: a Python-modul (eml2str_rs) a "python" feature-rel - lasd build_python.sh
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "eml2str-bench"
+path = "src/main.rs"
+
+[dependencies]
+encoding_rs = "0.8.42"
+memchr = "2"
+pyo3 = { version = "0.29.3", features = ["abi3-py39", "extension-module"], optional = true }
+regex = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[features]
+python = ["dep:pyo3"]

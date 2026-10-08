@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+eml2str_rs*.so
 
 # C extensions
 *.so
