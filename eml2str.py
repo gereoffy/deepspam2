@@ -1,5 +1,7 @@
 
 import io
+import os
+import mmap
 import codecs
 import encodings
 import re
@@ -1056,59 +1058,64 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
 
 
 # calls do_eml(headers,raw) for each email in mbox.  raw is either raw size (if getraw=False) or raw email (hdr+body) in bytes (if getraw=True)
+# A fajl aktualis poziciojatol (f.tell()) olvas, es a vegpoziciot adja vissza (inkrementalis feldolgozashoz).
+# mmap-pel dolgozik: a leveleket find()-dal vagja szet, soronkent csak a fejleceket nezi (a torzset nem jarja be).
+# Az indulaskori fajlmeretig olvas; ami kozben hozzairodik, azt a kovetkezo hivas latja. A fajlt futas kozben nem
+# szabad csonkolni (a lekepezett, de megszunt resz olvasasa SIGBUS-t okoz).
 def readfolder(f,do_eml,keephdrs=['from','subject','x-deepspam','x-grey-ng'],getraw=False):
-  eml=None
-  raw=[]
-  in_hdr=False
-  fpos=f.tell()
-  for rawline in f:
-
-    if in_hdr:
-        fpos+=len(rawline)
-        if getraw: raw.append(rawline)
-
-        line=rawline.rstrip(b'\r\n') # The chars argument is a string specifying the set of characters to be removed. 
+  start=f.tell()
+  size=os.fstat(f.fileno()).st_size
+  if start>=size: return start
+  data=mmap.mmap(f.fileno(),0,access=mmap.ACCESS_READ)  # a teljes fajl, de csak a tenylegesen olvasott lapok toltodnek be
+  try:
+    pos=start
+    while pos<size:
+      eml={"_fpos":pos}
+      hdr=b''
+      p=pos
+      nl=data.find(b'\n',p)
+      e=nl+1 if nl>=0 else size
+      if data[pos:pos+5]==b'From ':
+        eml["_from"]=data[pos:e].rstrip(b'\r\n').decode("us-ascii", errors="ignore")
+      else:  # nem From sorral kezdodik (fajl eleje / kezdopozicio): az elso sor mar fejlec, akkor is, ha ures
+        hdr=data[pos:e].rstrip(b'\r\n')
+      p=e
+      # fejlec-sorok az elso ures sorig
+      blank=False
+      hend=size
+      while p<size:
+        nl=data.find(b'\n',p)
+        e=nl+1 if nl>=0 else size
+        line=data[p:e].rstrip(b'\r\n') # The chars argument is a string specifying the set of characters to be removed.
         if len(line)==0: # empty line -> end of the header
-            in_hdr=False
-            eml["_hsize"]=fpos-eml["_fpos"]
-        elif line[0] in [9,32]: # starts with tab/space -> header continuation
-            hdr+=line # keep whitespace?
-            continue
-
+          blank=True
+          hend=e
+        elif line[0] in (9,32): # starts with tab/space -> header continuation
+          hdr+=line # keep whitespace?
+          p=e
+          continue
         if hdr:
-            try:
-                hdrname,hdrbody = hdr.split(b':',1)
-                hdrname=hdrname.decode("us-ascii").lower()
-                if hdrname in keephdrs: # csak ezek kellenek
-                    eml[hdrname]=hdrbody.lstrip().decode("utf-8", 'mixed')
-            except Exception as e:
-                print("INVALID:",hdr,"\n   EXC:", repr(e))
-
+          try:
+            hdrname,hdrbody = hdr.split(b':',1)
+            hdrname=hdrname.decode("us-ascii").lower()
+            if hdrname in keephdrs: # csak ezek kellenek
+              eml[hdrname]=hdrbody.lstrip().decode("utf-8", 'mixed')
+          except Exception as ex:
+            print("INVALID:",hdr,"\n   EXC:", repr(ex))
         hdr=line
-        continue
-
-    # in body:
-    if rawline[0:5]==b'From ':
-        if eml: do_eml(eml,b''.join(raw) if getraw else fpos-eml["_fpos"])
-        in_hdr=True
-        hdr=b''
-        eml={"_fpos":fpos,"_from":rawline.rstrip(b'\r\n').decode("us-ascii", errors="ignore")}
-        raw=[]
-
-    elif not eml: # and (rawline[:10]==b'X-Grey-ng:' or rawline[:9]==b'Received:'):
-        in_hdr=True
-        hdr=rawline.rstrip(b'\r\n')
-        eml={"_fpos":fpos}
-
-    elif rawline.startswith(b'Content-Disposition: attachment'):
-        eml['_attach']=True
-
-    fpos+=len(rawline)
-    if getraw: raw.append(rawline)
-
-  if eml: do_eml(eml,b''.join(raw) if getraw else fpos-eml["_fpos"])
-  return fpos # folder file size
-
+        p=e
+        if blank: break
+      if blank: eml["_hsize"]=hend-pos
+      # a level vege: a kovetkezo "From " kezdetu sor a torzsben (ures sor nelkul a fajl vegeig fejlec)
+      nxt=data.find(b'\nFrom ',hend-1) if blank else -1
+      end=nxt+1 if nxt>=0 else size
+      if not getraw and blank and data.find(b'\nContent-Disposition: attachment',hend-1,end)>=0: eml['_attach']=True
+      do_eml(eml,data[pos:end] if getraw else end-pos)
+      pos=end
+  finally:
+    data.close()
+  f.seek(size)
+  return size # folder file size
 
 
 
