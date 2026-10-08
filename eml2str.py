@@ -262,9 +262,12 @@ def ascii_compatible(cs):
     except LookupError: return True
     except UnicodeError: return False
 
+_FIX_TABLE=dict(invalid_charrefs)  # str.translate tabla: kodpont -> csere ('' = torles)
+
 def fix_chars(s):
     # az invalid_charrefs csere a dekodolt szovegen (C1 -> cp1252 irasjelek, Õ Û õ û -> Ő Ű ő ű, nbsp, shy...)
-    return ''.join([invalid_charrefs.get(ord(c),c) for c in s])
+    # (str.translate: ugyanaz, mint a ''.join([invalid_charrefs.get(ord(c),c) for c in s]), de C-ben fut)
+    return s.translate(_FIX_TABLE)
 
 # a utf-32-le elobb kell, mint a vele azonosan kezdodo utf-16-le
 BOMS=((codecs.BOM_UTF8,"utf-8"),(codecs.BOM_UTF32_LE,"utf-32-le"),(codecs.BOM_UTF32_BE,"utf-32-be"),
@@ -724,7 +727,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
 
 
 def eml2str(msg,ds2=False):
-  msg=parse_eml(msg,decode=True)
+  msg=parse_eml(msg,decode='lazy')  # csak a szovegkent felhasznalt reszek body-ja dekodolodik
 
   subject=None
   if ds2: # extract subject
@@ -747,7 +750,7 @@ def eml2str(msg,ds2=False):
     fnev=p["name"]
 #    print((ctyp,charset,disp,fnev))
     if (ctyp.split('/')[0]=="text" and disp!="attachment") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or ctyp=="application/rtf":
-        data=p["payload"]
+        data=get_payload(p)
         data=decode_payload(data,ctyp,charset)
 #        if not text or len(data)>20: text=data # a kesobbi szoveg vszinu jobb (html>text, delivery hibak utan csatolva az eredeti level, elol a spamassassin fejlece stb)
         if not text or (ctyp in ["text/html","application/ms-tnef"] and len(data)>20) or len(data)>len(text)//2 or text.startswith("Spam detection software,"): text=data
@@ -920,15 +923,29 @@ def decode_body(data,encoding,binary=True):
     return data
 
 
+def header_end(data,p,pend):
+    # a fejlec vege: min(find(b'\n\n')+2, find(b'\r\n\r\n')+4) a data[p:pend]-ben, kulonben pend.
+    # Egy menetben, a sorvegeken lepkedve: a ket kulon find() CRLF-es levelnel (ahol nincs \n\n) a resz vegeig
+    # keresett, minden MIME-resznel ujra.
+    i=data.find(b'\n',p,pend)
+    while i>=0:
+        if i+1<pend and data[i+1]==10: return i+2,b'\n'
+        if i>p and data[i-1]==13 and i+2<pend and data[i+1]==13 and data[i+2]==10: return i+3,b'\r\n'
+        i=data.find(b'\n',i+1,pend)
+    return pend,b'\n'
+
+# decode='lazy' eseten a body dekodolasa (Content-Transfer-Encoding) csak keresre, a get_payload()-ban tortenik
+def get_payload(eml):
+    if "payload" not in eml and "_body" in eml:
+        data,hsize,pend=eml["_body"]
+        eml["payload"]=decode_body(data[hsize:pend], eml["encoding"])
+    return eml.get("payload")
+
 def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     if pend<0: pend=len(data)
     
     # find header size:
-    hsize=data.find(b'\n\n',p,pend)+2
-    if hsize<2: hsize=pend
-    hsize2=data.find(b'\r\n\r\n',p,pend)+4
-    newline=b'\n'
-    if hsize2>=4 and hsize2<hsize: hsize,newline=hsize2,b'\r\n'
+    hsize,newline=header_end(data,p,pend)
     if debug: print("parse_eml:", level, p,hsize, pend,  newline, data[p:p+32],data[hsize:hsize+32],data[pend-32:pend])
 #    if level>0 and not data.startswith(b'Content-') and b'Content-' in data: print("BadHeader:",data[:120]) # MIME-Version: es Date: is szokott lenni legelol...
 
@@ -1028,6 +1045,8 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
         # message/rfc822
         pe=parse_eml(data,debug,decode,level+1,p=hsize,pend=pend)
         eml["parts"].append(pe)
+    elif decode=='lazy':
+        eml["_body"]=(data,hsize,pend)  # csak a get_payload() dekodolja (a csatolmanyokat igy nem kell)
     elif decode:
         # data, decode?
         eml["payload"]=decode_body(data[hsize:pend], cenc)
