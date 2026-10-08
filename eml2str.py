@@ -1,6 +1,7 @@
 
 import io
 import os
+import sys
 import mmap
 import codecs
 import encodings
@@ -477,6 +478,13 @@ def tag_type(tag):
     return 1,name
 
 
+# a tag vege ('>' utan): az idezojel csak '=' utan nyit idezetet (abban a '>' nem szamit), a '=' utani whitespace
+# es ujabb '=' atugorhato; lezaratlan idezet vagy '>' hianya eseten a data vege. A html2text() byte-onkenti
+# ciklusanak regex valtozata: CPythonban ~2x gyorsabb, PyPy-ban viszont a JIT-elt ciklus a gyorsabb, ott az fut
+# (es debug modban is, mert az a hibas idezojelekre warning-ot ir).
+TAG_END_USE_RE=sys.implementation.name!='pypy'
+TAG_END_RE=re.compile(rb'''(?:[^=>]+|=[\x00-\x20=]*(?:"[^"]*"?|'[^']*'?)?)*>?''')
+
 def html2text(data,debug=False):
   warning=''
   indent=0
@@ -504,23 +512,26 @@ def html2text(data,debug=False):
         q=p+1 # broken...
         warning+="WARN! missing comment end-tag at %d-\n"%(p)
 
-    ijel=None
-    eqsn=False
-    while q<len(data):
-      c=data[q]
-      q+=1
-      if ijel:  #  quoted string-en belul vagyunk?
-#        if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
-        if c==ijel: ijel=None  #  idezet vege
-        continue
-      if eqsn:  #  = jel utan vagyunk?
-        if c==34 or c==39: ijel=c   # idezojelek = utan oke
-        if c>32: eqsn=False         # nem whitespace (9,10,13,32)
-      else:
-        if c==34 or c==39: # idezojelek = jel nelkul:
-            if data[p+1]!=33: warning+="WARN! %c without = at %d\n"%(c,q)  # <! utan oke (a doctype-ban pl. lehet), egyebkent warning
-      if c==61: eqsn=True #  =
-      if c==62: break     #  >
+    if TAG_END_USE_RE and not debug:
+      q=TAG_END_RE.match(data,q).end()
+    else:
+      ijel=None
+      eqsn=False
+      while q<len(data):
+        c=data[q]
+        q+=1
+        if ijel:  #  quoted string-en belul vagyunk?
+#          if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
+          if c==ijel: ijel=None  #  idezet vege
+          continue
+        if eqsn:  #  = jel utan vagyunk?
+          if c==34 or c==39: ijel=c   # idezojelek = utan oke
+          if c>32: eqsn=False         # nem whitespace (9,10,13,32)
+        else:
+          if c==34 or c==39: # idezojelek = jel nelkul:
+              if data[p+1]!=33: warning+="WARN! %c without = at %d\n"%(c,q)  # <! utan oke (a doctype-ban pl. lehet), egyebkent warning
+        if c==61: eqsn=True #  =
+        if c==62: break     #  >
     # 
     rawtag=data[p+1:q-1] # tag without < >
     tag=rawtag.lower()
