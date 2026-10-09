@@ -386,7 +386,7 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         let txt = &data[q.min(p)..p];
 
         if contains(tag, b"style") {
-            let tag2 = replace(tag, b": ", b":");
+            let tag2 = colon_squeeze(tag); // whitespace a ':' korul (display : none, display:\tnone...)
             if contains(&tag2, b"display:none")
                 || contains(&tag2, b"font-size:0p")
                 || contains(&tag2, b"font-size:1p")
@@ -408,7 +408,8 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
 
         if tag == b"div" || (tt >= 0 && matches!(ttag.as_slice(), b"p" | b"br" | b"tr")) {
             text.extend_from_slice(b"<BR>");
-        } else if !matches!(ttag.as_slice(), b"span" | b"a" | b"b" | b"i" | b"u" | b"em" | b"strong" | b"abbr" | b"font") {
+        } else if !matches!(ttag.as_slice(), b"span" | b"a" | b"b" | b"i" | b"u" | b"em" | b"strong" | b"abbr" | b"font" | b"!" | b"?") {
+            // (a comment sem tesz szokozt: vi<!-- x -->agra = viagra)
             text.push(b' ');
         }
         text.extend_from_slice(txt);
@@ -440,6 +441,28 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         if seen.insert(url.clone()) {
             out.extend_from_slice(b"\nURL: ");
             out.extend_from_slice(py_prefix(&url, 128).as_bytes());
+        }
+    }
+    out
+}
+
+/// re.sub(rb'\s*:\s*', b':', s): a ':' koruli whitespace eltavolitasa
+fn colon_squeeze(s: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        if s[i] == b':' {
+            while out.last().is_some_and(|&b| is_bws(b)) {
+                out.pop();
+            }
+            out.push(b':');
+            i += 1;
+            while i < s.len() && is_bws(s[i]) {
+                i += 1;
+            }
+        } else {
+            out.push(s[i]);
+            i += 1;
         }
     }
     out

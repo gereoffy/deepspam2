@@ -500,6 +500,8 @@ TAG_END_RE=re.compile(rb'''
   )*
   >?''', re.X)
 
+STYLE_COLON_RE=re.compile(rb'\s*:\s*')
+
 def html2text(data,debug=False):
   warning=''
   indent=0
@@ -616,7 +618,7 @@ def html2text(data,debug=False):
 #    print(q,p,tt,ttag,txt) # debug
 
     if b'style' in tag: # detect hidden text!
-        tag=tag.replace(b': ',b':')
+        tag=STYLE_COLON_RE.sub(b':',tag)  # whitespace a ':' korul (display : none, display:\tnone...)
         if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
 #            if b'display:none' in tag and len(text.strip())==0:
@@ -629,7 +631,7 @@ def html2text(data,debug=False):
     if tag==b'div' or (tt>=0 and ttag in ['p','br','tr']):
         text+=[b'<BR>']  # https://www.w3schools.com/html/html_blocks.asp
     else:
-        if not ttag in ['span','a','b','i','u','em','strong','abbr','font']: text+=[b' '] # not inline elements
+        if not ttag in ['span','a','b','i','u','em','strong','abbr','font','!','?']: text+=[b' '] # not inline elements (a comment sem: vi<!-- x -->agra = viagra)
     text+=[txt]
     tlen+=len(txt.strip())
 
