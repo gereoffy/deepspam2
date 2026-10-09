@@ -22,11 +22,11 @@ class DeepSpam_model(torch.nn.Module):
         x_conv = [ torch.max( torch.nn.functional.relu( conv(x) ), dim=2) for conv in self.convl ] # Conv1D + ReLU + GlobalMaxPooling
         if info is not None: info["spans"]=[ (i,i+conv.kernel_size[0]) for conv,c in zip(self.convl,x_conv) for i in c.indices[0].tolist() ]
         x=torch.cat([c.values for c in x_conv],dim=1)
-#        x = self.l_bn(x)
-        x = self.l_dr2(x) # drop 0.5
         if info is not None:
             x.retain_grad()
             info["feats"]=x
+#        x = self.l_bn(x)
+        x = self.l_dr2(x) # drop 0.5
         x = torch.nn.functional.relu(self.l_hid(x))  # linear 512->64 + ReLU
         x = self.l_fc(x)   # linear 64->2
         return x
