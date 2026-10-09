@@ -16,22 +16,20 @@ class DeepSpam_model(torch.nn.Module):
 #        self.l_bn = torch.nn.BatchNorm1d(len(filter_sizes)*filters)
         self.l_fc = torch.nn.Linear(hidden, num_classes)
 
-    def forward(self, x):
+    # info: optional dict, filled with max-pool windows (spans) and pooled features (for DeepSpam.explain)
+    def forward(self, x, info=None):
         x=x.permute(0, 2, 1) # reorder embedding->conv1d
-#        x_conv = [ torch.max( torch.nn.functional.relu( conv(x) ), dim=2).values for conv in self.convl ] # Conv1D + ReLU + GlobalMaxPooling
-        x_conv = [ torch.max(conv(x), dim=2).values for conv in self.convl ] # Conv1D + ReLU + GlobalMaxPooling
-        x=torch.cat(x_conv,dim=1)
+        x_conv = [ torch.max( torch.nn.functional.relu( conv(x) ), dim=2) for conv in self.convl ] # Conv1D + ReLU + GlobalMaxPooling
+        if info is not None: info["spans"]=[ (i,i+conv.kernel_size[0]) for conv,c in zip(self.convl,x_conv) for i in c.indices[0].tolist() ]
+        x=torch.cat([c.values for c in x_conv],dim=1)
 #        x = self.l_bn(x)
-        x=torch.nn.functional.relu(x,inplace=True)
-
-#        x = self.l_dr2(x) # drop 0.5
+        x = self.l_dr2(x) # drop 0.5
+        if info is not None:
+            x.retain_grad()
+            info["feats"]=x
         x = torch.nn.functional.relu(self.l_hid(x))  # linear 512->64 + ReLU
-#        x = torch.nn.functional.leaky_relu(self.l_hid(x))
-#        x = self.l_hid(x)
-#        x = torch.nn.functional.tanh(x)
         x = self.l_fc(x)   # linear 64->2
         return x
-
 
 
 class DeepSpam:
@@ -110,6 +108,42 @@ class DeepSpam:
         res=logits[0].sigmoid() # get probs
         res=res[0]*100.0/(res[0]+res[1])
     return res.item() # 0.0 ... 100.0 %
+
+  # token-level explanation of the decision (gradient*input on the embeddings).
+  # The model is piecewise linear in the embeddings (conv+relu+maxpool+linear), so this is exact:
+  #   diff = logit_spam - logit_ham = sum(tok) + bias terms
+  # returns None if too short, else dict:
+  #   score:  same 0..100% as __call__     diff: logit difference (>0 = spam)
+  #   pieces: all tokens (untruncated)     n: number of tokens seen by the model (rest is truncated)
+  #   tok:    per-token contributions [n]
+  #   groups: [ ((start,end), contribution, text) ] max-pool windows of the conv filters, sorted spam->ham
+  def explain(self,text,max_len=MAX_BLOCK,min_len=MIN_BLOCK):
+    proc=self.preprocess([text])
+    full=self.tokenize(proc)[0]
+    n=min(len(full),max_len)
+    if n<min_len: return None
+    ids=full[:max_len]+[0]*(max_len-n)
+
+    self.model.eval()
+    with torch.enable_grad():
+        emb=self.embedding(torch.tensor([ids],dtype=torch.int,device=self.device)).detach().requires_grad_()
+        info={}
+        logits=self.model(emb,info)
+        diff=logits[0,0]-logits[0,1]
+        diff.backward()
+
+    p=logits[0].detach().sigmoid()
+    tok=(emb.grad*emb).sum(-1)[0,:n].tolist()
+    fc=(info["feats"].grad*info["feats"])[0].tolist()
+    pieces=[self.tokenizer.id_to_piece(i).replace("▁"," ") for i in full]
+    groups={}
+    for (a,b),c in zip(info["spans"],fc):
+        if c==0.0 or a>=n: continue
+        b=min(b,n)
+        groups[(a,b)]=groups.get((a,b),0.0)+c
+    groups=[ (s,c,"".join(pieces[s[0]:s[1]]).strip()) for s,c in sorted(groups.items(),key=lambda x:-x[1]) ]
+    return dict(score=(p[0]*100.0/(p[0]+p[1])).item(), diff=diff.item(), pieces=pieces, n=n, tok=tok, groups=groups)
+
 
   def evalbatch(self,texts,max_len=MAX_BLOCK,min_len=MIN_BLOCK,tokenized=False):
     with torch.no_grad():
