@@ -392,7 +392,7 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
                 || contains(&tag2, b"font-size:1p")
                 || contains(&tag2, b"max-height:0p")
                 || contains(&tag2, b"mso-hide:all")
-                || contains(&tag2, b"opacity:0")
+                || opacity_hidden(&tag2)
             {
                 if contains(&tag2, b"signedadaptivecard") {
                     continue;
@@ -444,6 +444,38 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+/// eml2str.opacity_hidden(): az (utolso) `opacity:` erteke < 0.5 (a `%` alak is); az ertek az
+/// `opacity:([0-9]*\.?[0-9]+)(%?)` regex szerint
+fn opacity_hidden(tag: &[u8]) -> bool {
+    let mut last: Option<f64> = None;
+    let mut i = 0;
+    while let Some(p) = find(tag, b"opacity:", i) {
+        let s = p + 8;
+        i = s;
+        let mut e = s;
+        while e < tag.len() && tag[e].is_ascii_digit() {
+            e += 1;
+        }
+        let mut end = e; // a szam vege
+        if e < tag.len() && tag[e] == b'.' && e + 1 < tag.len() && tag[e + 1].is_ascii_digit() {
+            end = e + 1;
+            while end < tag.len() && tag[end].is_ascii_digit() {
+                end += 1;
+            }
+        } else if e == s {
+            continue; // nincs szam
+        }
+        let mut v: f64 = std::str::from_utf8(&tag[s..end]).unwrap().parse().unwrap();
+        if tag.get(end) == Some(&b'%') {
+            v /= 100.0;
+            end += 1;
+        }
+        last = Some(v);
+        i = end;
+    }
+    last.is_some_and(|v| v < 0.5)
 }
 
 /// re.sub(rb'\s*:\s*', b':', s): a ':' koruli whitespace eltavolitasa

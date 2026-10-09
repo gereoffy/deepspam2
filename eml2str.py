@@ -501,6 +501,16 @@ TAG_END_RE=re.compile(rb'''
   >?''', re.X)
 
 STYLE_COLON_RE=re.compile(rb'\s*:\s*')
+OPACITY_RE=re.compile(rb'opacity:([0-9]*\.?[0-9]+)(%?)')
+
+# halvany (opacity < 0.5) szoveg: a spammerek ezzel rejtik el a szurok megtevesztesere betett szoveget. A 0.5 es
+# feletti erteket nem vesszuk rejtettnek: az alig halvanyabb (pl. 0.9) szoveg lathato, es eppen a spam fo szovege szokott lenni.
+def opacity_hidden(tag):  # csak akkor hivjuk, ha b'opacity:' in tag
+    m=OPACITY_RE.findall(tag)
+    if not m: return False
+    v,pct=m[-1]  # tobb opacity eseten (mint a CSS-ben) az utolso szamit
+    v=float(v)
+    return (v/100 if pct else v)<0.5
 
 def html2text(data,debug=False):
   warning=''
@@ -619,7 +629,7 @@ def html2text(data,debug=False):
 
     if b'style' in tag: # detect hidden text!
         tag=STYLE_COLON_RE.sub(b':',tag)  # whitespace a ':' korul (display : none, display:\tnone...)
-        if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or b'opacity:0' in tag:
+        if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or (b'opacity:' in tag and opacity_hidden(tag)):
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
 #            if b'display:none' in tag and len(text.strip())==0:
             if b'display:none' in tag and tlen==0:
