@@ -267,13 +267,13 @@ class DeepSpam:
     fig.canvas.flush_events()
 
 
-  def train(self,texts,label_ids,num_train,epochs=15,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001):
+  def train(self,texts,label_ids,num_train,epochs=15,batch_size=1024,max_len=MAX_BLOCK,dropwords=10,savebest=True,lr1=0.0001,plot=False):
 
     self.log("HPARAMS: epochs=%d batch=%d blocklen=%d dropwords=%d"%(epochs,batch_size,max_len,dropwords))
 #    self.log("DATASET: %d train + %d eval = %d total   len: min=%d max=%d"%(num_train,len(texts)-num_train,len(texts), min(len(s) for s in texts), max(len(s) for s in texts) ))
     self.log("DATASET: %d train + %d eval = %d total"%(num_train,len(texts)-num_train,len(texts) ))
 
-    self.plot(clear=True)
+    if plot: self.plot(clear=True)
 
 #    print(self.tokenized(texts[:2]))
 
@@ -375,7 +375,7 @@ class DeepSpam:
 
 #        print(self.model.l_hid.weight.shape,self.model.l_fc.weight.shape) # torch.Size([32, 512]) torch.Size([2, 32])
 
-        self.plot()
+        if plot: self.plot()
 
         if len(wmid)/len(w)>0.5: break # more than 50% of weights near zero...
 
