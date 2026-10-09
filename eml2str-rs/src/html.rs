@@ -259,37 +259,51 @@ fn tag_type(tag: &[u8]) -> (i32, &[u8]) {
     (1, name)
 }
 
-/// a tag vege ('>' utan) q-tol: a Python html2text belso ciklusa (idezojel csak '=' utan szamit), memchr-rel
+/// a tag vege ('>' utan) q-tol, a HTML5 tokenizer szerint - az eml2str.py TAG_END_RE / html2text ciklusa:
+/// whitespace: tab, LF, FF, CR, szokoz; a tag- es attributumnevben levo '=' es idezojel nem nyit semmit; az '=' utan
+/// (whitespace utan) "idezett", 'idezett' vagy idezojel nelkuli ertek; lezaratlan idezet / '>' hianya: a data vege
 #[inline]
 fn tag_end(data: &[u8], mut q: usize) -> usize {
+    #[derive(PartialEq)]
+    enum St {
+        TagName,
+        BeforeName,
+        Name,
+        AfterName,
+        BeforeValue,
+        Unquoted,
+    }
     let n = data.len();
-    loop {
-        let Some(k) = memchr::memchr2(b'=', b'>', &data[q..]) else { return n };
-        q += k + 1;
-        if data[q - 1] == b'>' {
+    let mut st = St::TagName;
+    while q < n {
+        let c = data[q];
+        q += 1;
+        if c == b'>' {
             return q;
         }
-        // '=' utan (eqsn): whitespace atugorva; idezojel -> a parjaig; '=' -> marad eqsn; mas -> normal allapot
-        loop {
-            if q >= n {
-                return n;
-            }
-            let c = data[q];
-            q += 1;
-            match c {
-                0..=32 | b'=' => continue,
-                b'"' | b'\'' => match memchr::memchr(c, &data[q..]) {
-                    Some(e) => {
-                        q += e + 1;
-                        break;
-                    }
-                    None => return n,
-                },
-                b'>' => return q,
-                _ => break,
-            }
-        }
+        let ws = matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0c);
+        st = match st {
+            St::TagName if ws || c == b'/' => St::BeforeName,
+            St::BeforeName if !(ws || c == b'/') => St::Name,
+            St::Name if c == b'=' => St::BeforeValue,
+            St::Name if ws => St::AfterName,
+            St::Name if c == b'/' => St::BeforeName,
+            St::AfterName if c == b'=' => St::BeforeValue,
+            St::AfterName if c == b'/' => St::BeforeName,
+            St::AfterName if !ws => St::Name,
+            St::BeforeValue if c == b'"' || c == b'\'' => match memchr::memchr(c, &data[q..]) {
+                Some(e) => {
+                    q += e + 1;
+                    St::BeforeName // idezet vege, johet a kovetkezo attributum
+                }
+                None => return n,
+            },
+            St::BeforeValue if !ws => St::Unquoted,
+            St::Unquoted if ws => St::BeforeName,
+            other => other,
+        };
     }
+    n
 }
 
 /// html2text() (debug=False valtozat)
@@ -307,7 +321,13 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         if data[p..].starts_with(b"<!--") {
             q = find(data, b"-->", p).unwrap_or(p + 1);
         }
-        q = tag_end(data, q);
+        let c = data.get(p + 1).copied();
+        if c == Some(b'!') || c == Some(b'?') || (c == Some(b'/') && !data.get(p + 2).is_some_and(|b| b.is_ascii_alphabetic())) {
+            // <!...>, <?...>, </ + nem betu: (bogus) comment, az elso '>'-ig, idezojelektol fuggetlenul
+            q = find(data, b">", q).map_or(n, |e| e + 1);
+        } else {
+            q = tag_end(data, q);
+        }
         let rawtag: &[u8] = if q >= 1 && q - 1 > p + 1 { &data[p + 1..q - 1] } else { b"" };
         tagbuf.clear();
         tagbuf.extend(rawtag.iter().map(|b| b.to_ascii_lowercase()));

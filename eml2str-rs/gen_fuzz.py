@@ -32,7 +32,9 @@ HTML_BITS = ['<br>', '<BR/>', '<p>', '</p>', '<div>', '<DIV style="display:none"
     '<!-- comment <b> -->', '<!-- broken', '<![CDATA[ x ]]>', '<svg><text>s</text></svg>', '< 5 >', '<3', 'a < b',
     '<td>', '<tr>', '<img src="i.png">', '<meta charset="iso-8859-2">', '<meta http-equiv="Content-Type" content="text/html; charset=windows-1250">',
     '<body>', '</body>', '<head>', '</head>', '<?xml version="1.0"?>', '<!DOCTYPE html>', '<b>', '</b>', '<x a="1>2">', "<x a='q>",
-    '<div style="mso-hide:all">h</div>', '<div style="opacity:0">o</div>', '<p style="display: none">pp</p>', '<signedadaptivecard style="display:none">', '\r\n', '\n', '\t']
+    '<div style="mso-hide:all">h</div>', '<id="publicly>', '<a x=="y>z">', '<a x=b=">">', '<a ="x>y">', '<a x=\x01"y>z">',
+    '<a x=\x0c"y>z">', '<!x a="b>c">', '<?x a="b>c"?>', '</ x>', '</>', '<a/x="y>z">', '<a x="y"z="w>v">', '<a= "=">',
+    '<a x = \'y>z\' >', '<br/x="a>b">', '<a\x0bx="y>z">', '<div style="opacity:0">o</div>', '<p style="display: none">pp</p>', '<signedadaptivecard style="display:none">', '\r\n', '\n', '\t']
 
 def rword(): return rnd.choice(WORDS)
 def rtext(n): return ' '.join(rword() for _ in range(n))

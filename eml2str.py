@@ -478,12 +478,27 @@ def tag_type(tag):
     return 1,name
 
 
-# a tag vege ('>' utan): az idezojel csak '=' utan nyit idezetet (abban a '>' nem szamit), a '=' utani whitespace
-# es ujabb '=' atugorhato; lezaratlan idezet vagy '>' hianya eseten a data vege. A html2text() byte-onkenti
-# ciklusanak regex valtozata: CPythonban ~2x gyorsabb, PyPy-ban viszont a JIT-elt ciklus a gyorsabb, ott az fut
-# (es debug modban is, mert az a hibas idezojelekre warning-ot ir).
+# A tag vegenek keresese a HTML5 tokenizer szerint (https://html.spec.whatwg.org/#tokenization), egyszerusitve:
+#  - whitespace: tab, LF, FF, CR, szokoz
+#  - a tag neve es az attributumok neve whitespace-ig, '/'-ig vagy '>'-ig tart: a bennuk levo '=' es idezojel nem nyit
+#    semmit (pl. <id="x> az elso '>'-nel zar)
+#  - az attributum neve utan (whitespace utan is) '=', majd whitespace utan az ertek: "idezett", 'idezett' vagy idezojel
+#    nelkuli (ez whitespace-ig vagy '>'-ig tart, a benne levo '=' es idezojel sem nyit semmit: a=b=">" az elso '>'-nel zar)
+#  - lezaratlan idezet vagy '>' hianya eseten a data vegeig
+# Igy a tag sehol sem tart tovabb, mint a bongeszokben: nem rejtunk el a szuro elol olyan szoveget, amit a level olvasoja
+# lat. A <!...>, <?...> es a </ + nem betu (bogus comment) mindig az elso '>'-ig tart, ezt a html2text kulon kezeli.
+# TAG_END_RE a regex valtozat (CPythonban ez a gyorsabb); a html2text ciklusa ugyanez byte-onkent: PyPy-ban az a gyorsabb,
+# es debug modban is az fut, mert az a hibas helyen allo idezojelekre warning-ot ir.
 TAG_END_USE_RE=sys.implementation.name!='pypy'
-TAG_END_RE=re.compile(rb'''(?:[^=>]+|=[\x00-\x20=]*(?:"[^"]*"?|'[^']*'?)?)*>?''')
+TAG_END_RE=re.compile(rb'''
+  [^\t\n\f\r />]*                                        # a tag neve
+  (?: [\t\n\f\r /]+                                      # whitespace, '/'
+    | [^\t\n\f\r />][^\t\n\f\r />=]*                     # attributum neve (az elso karaktere '=' is lehet)
+      (?: [\t\n\f\r ]*=[\t\n\f\r ]*                      # '=' (korulotte whitespace)
+          (?: "[^"]*"? | '[^']*'? | [^\t\n\f\r >]* )    # ertek: idezett (lezaratlan: a data vegeig) vagy idezojel nelkuli
+      )?
+  )*
+  >?''', re.X)
 
 def html2text(data,debug=False):
   warning=''
@@ -512,26 +527,40 @@ def html2text(data,debug=False):
         q=p+1 # broken...
         warning+="WARN! missing comment end-tag at %d-\n"%(p)
 
-    if TAG_END_USE_RE and not debug:
+    c=data[p+1:p+2]
+    if c==b'!' or c==b'?' or (c==b'/' and not data[p+2:p+3].isalpha()):  # <!...>, <?...>, </ + nem betu: (bogus) comment
+      q=data.find(b'>',q)+1 or len(data)                                 # az elso '>'-ig, idezojelektol fuggetlenul
+    elif TAG_END_USE_RE and not debug:
       q=TAG_END_RE.match(data,q).end()
-    else:
-      ijel=None
-      eqsn=False
+    else:  # ugyanaz, mint a TAG_END_RE, byte-onkent
+      st=0       # 0: tag neve, 1: attributum neve elott, 2: attributum neve, 3: attributum neve utan, 4: ertek elott, 5: idezojel nelkuli ertek
+      ijel=None  # idezett ertekben vagyunk: a nyito idezojel
       while q<len(data):
         c=data[q]
         q+=1
         if ijel:  #  quoted string-en belul vagyunk?
-#          if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
-          if c==ijel: ijel=None  #  idezet vege
+          if c==ijel: ijel=None; st=1  #  idezet vege, johet a kovetkezo attributum
           continue
-        if eqsn:  #  = jel utan vagyunk?
-          if c==34 or c==39: ijel=c   # idezojelek = utan oke
-          if c>32: eqsn=False         # nem whitespace (9,10,13,32)
-        else:
-          if c==34 or c==39: # idezojelek = jel nelkul:
-              if data[p+1]!=33: warning+="WARN! %c without = at %d\n"%(c,q)  # <! utan oke (a doctype-ban pl. lehet), egyebkent warning
-        if c==61: eqsn=True #  =
         if c==62: break     #  >
+        ws=c<=32 and (c==32 or c==9 or c==10 or c==13 or c==12)  # a c<=32 elobb: a legtobb byte-nal ez az egy osszehasonlitas eleg
+        if (c==34 or c==39) and st!=4: warning+="WARN! %c without = at %d\n"%(c,q)  # idezojel nem ertek elejen: nem nyit idezetet
+        if st==0:    # tag neve
+          if ws or c==47: st=1
+        elif st==1:  # attributum neve elott (whitespace, '/' utan)
+          if not (ws or c==47): st=2
+        elif st==2:  # attributum neve
+          if c==61: st=4
+          elif ws: st=3
+          elif c==47: st=1
+        elif st==3:  # attributum neve utan (whitespace utan)
+          if c==61: st=4
+          elif c==47: st=1
+          elif not ws: st=2
+        elif st==4:  # '=' utan, ertek elott
+          if c==34 or c==39: ijel=c
+          elif not ws: st=5
+        elif ws:     # idezojel nelkuli ertek: whitespace-ig ('>'-ig)
+          st=1
     # 
     rawtag=data[p+1:q-1] # tag without < >
     tag=rawtag.lower()
