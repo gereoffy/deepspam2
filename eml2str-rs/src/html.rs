@@ -386,7 +386,9 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         let txt = &data[q.min(p)..p];
 
         if contains(tag, b"style") {
-            let tag2 = colon_squeeze(tag); // whitespace a ':' korul (display : none, display:\tnone...)
+            // minden whitespace torlese (tag.translate(None, b' \t\n\r\x0b\x0c')): display : none, display:\tnone, es a
+            // sortoressel szettort stilus is (a Postfix pl. 990 karakternel CRLF+szokozzel tordel: font-s\n ize:1px)
+            let tag2: Vec<u8> = tag.iter().copied().filter(|&b| !is_bws(b)).collect();
             if contains(&tag2, b"display:none")
                 || contains(&tag2, b"font-size:0p")
                 || contains(&tag2, b"font-size:1p")
@@ -476,28 +478,6 @@ fn opacity_hidden(tag: &[u8]) -> bool {
         i = end;
     }
     last.is_some_and(|v| v < 0.5)
-}
-
-/// re.sub(rb'\s*:\s*', b':', s): a ':' koruli whitespace eltavolitasa
-fn colon_squeeze(s: &[u8]) -> Vec<u8> {
-    let mut out: Vec<u8> = Vec::with_capacity(s.len());
-    let mut i = 0;
-    while i < s.len() {
-        if s[i] == b':' {
-            while out.last().is_some_and(|&b| is_bws(b)) {
-                out.pop();
-            }
-            out.push(b':');
-            i += 1;
-            while i < s.len() && is_bws(s[i]) {
-                i += 1;
-            }
-        } else {
-            out.push(s[i]);
-            i += 1;
-        }
-    }
-    out
 }
 
 /// bytes.replace(a, b)

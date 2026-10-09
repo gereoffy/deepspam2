@@ -500,7 +500,6 @@ TAG_END_RE=re.compile(rb'''
   )*
   >?''', re.X)
 
-STYLE_COLON_RE=re.compile(rb'\s*:\s*')
 OPACITY_RE=re.compile(rb'opacity:([0-9]*\.?[0-9]+)(%?)')
 
 # halvany (opacity < 0.5) szoveg: a spammerek ezzel rejtik el a szurok megtevesztesere betett szoveget. A 0.5 es
@@ -628,7 +627,8 @@ def html2text(data,debug=False):
 #    print(q,p,tt,ttag,txt) # debug
 
     if b'style' in tag: # detect hidden text!
-        tag=STYLE_COLON_RE.sub(b':',tag)  # whitespace a ':' korul (display : none, display:\tnone...)
+        tag=tag.translate(None,b' \t\n\r\x0b\x0c')  # minden whitespace torlese: display : none, display:\tnone, es a sortoressel
+                                                    # szettort stilus is (a Postfix pl. 990 karakternel CRLF+szokozzel tordel: font-s\n ize:1px)
         if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or (b'opacity:' in tag and opacity_hidden(tag)):
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
 #            if b'display:none' in tag and len(text.strip())==0:
