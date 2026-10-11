@@ -59,17 +59,24 @@ class DeepSpam_model:
         self.fc_w = weights["l_fc.weight"]
         self.fc_b = weights["l_fc.bias"]
 
-    def forward(self, x):
+    # info: optional dict, filled with max-pool positions, pooled features and hidden
+    # pre-activations (batch #0 only) - DeepSpam.explain uses it for the manual backprop
+    def forward(self, x, info=None):
         # x: (batch, seq_len, ndim) -> (batch, ndim, seq_len)  [embedding -> conv1d sorrend]
         x = np.transpose(x, (0, 2, 1))
 
         pooled = []
+        if info is not None: info["argmax"] = []
         for w, b in zip(self.conv_w, self.conv_b):
             c = _relu(_conv1d(x, w, b))            # Conv1D + ReLU
             pooled.append(np.max(c, axis=2))        # GlobalMaxPooling -> (batch, filters)
+            if info is not None: info["argmax"].append(np.argmax(c[0], axis=1))  # (filters,) window start
 
         x = np.concatenate(pooled, axis=1)          # (batch, len(filter_sizes)*filters)
-        x = _relu(x @ self.hid_w.T + self.hid_b)    # linear + ReLU
+        if info is not None: info["feats"] = x[0]
+        x = x @ self.hid_w.T + self.hid_b           # linear
+        if info is not None: info["hid"] = x[0]
+        x = _relu(x)                                # ReLU
         x = x @ self.fc_w.T + self.fc_b             # linear -> (batch, num_classes)
         return x
 
@@ -113,6 +120,53 @@ class DeepSpam:
     res = _sigmoid(logits[0])                             # get probs
     res = res[0] * 100.0 / (res[0] + res[1])              # normalize result to percent value
     return float(res)  # 0.0 ... 100.0 %
+
+  # token-level explanation of the decision (gradient*input on the embeddings, manual backprop).
+  # The model is piecewise linear in the embeddings (conv+relu+maxpool+linear), so this is exact:
+  #   diff = logit_spam - logit_ham = sum(tok) + bias terms
+  # returns None if too short, else dict:
+  #   score:  same 0..100% as __call__     diff: logit difference (>0 = spam)
+  #   pieces: all tokens (untruncated)     n: number of tokens seen by the model (rest is truncated)
+  #   tok:    per-token contributions [n]
+  #   groups: [ ((start,end), contribution, text) ] max-pool windows of the conv filters, sorted spam->ham
+  def explain(self, text, max_len=MAX_BLOCK, min_len=MIN_BLOCK):
+    proc = self.preprocess([text])
+    full = self.tokenize(proc)[0]
+    n = min(len(full), max_len)
+    if n < min_len: return None
+    ids = full[:max_len] + [0] * (max_len - n)
+
+    m = self.model
+    emb = self.embedding[np.asarray([ids], dtype=np.int64)]   # (1, seq_len, ndim)
+    info = {}
+    logits = m(emb, info)[0]
+
+    # backprop of diff=logit[0]-logit[1] down to the pooled features:
+    g = (m.fc_w[0] - m.fc_w[1]) * (info["hid"] > 0)           # through l_fc + ReLU
+    g = g @ m.hid_w                                            # through l_hid -> d(diff)/d(feats)
+    fc = g * info["feats"]                                     # per-filter (window) contribution
+
+    # ...and from each filter's max-pool window down to the tokens:
+    tok = np.zeros(max_len)
+    groups = {}
+    o = 0
+    for w, pos in zip(m.conv_w, info["argmax"]):
+        k = w.shape[2]
+        gf = g[o:o+len(pos)] * (info["feats"][o:o+len(pos)] > 0)  # ReLU: inactive filters get no gradient
+        win = pos[:, None] + np.arange(k)                          # (filters, k) token positions
+        c = np.einsum('fkd,fdk->fk', emb[0][win], w) * gf[:, None] # (filters, k) token contributions
+        np.add.at(tok, win, c)
+        for p, cc in zip(pos, fc[o:o+len(pos)]):
+            if cc == 0.0 or p >= n: continue
+            s = (int(p), min(int(p) + k, n))
+            groups[s] = groups.get(s, 0.0) + float(cc)
+        o += len(pos)
+
+    pieces = [self.tokenizer.id2piece[i].replace("▁", " ") for i in full]
+    groups = [ (s, c, "".join(pieces[s[0]:s[1]]).strip()) for s, c in sorted(groups.items(), key=lambda x: -x[1]) ]
+    p = _sigmoid(logits)
+    return dict(score=float(p[0] * 100.0 / (p[0] + p[1])), diff=float(logits[0] - logits[1]),
+                pieces=pieces, n=n, tok=tok[:n].tolist(), groups=groups)
 
   # load the .npz saved by convert_weights.py:
   def load(self, path="model/deepspam_weights.npz"):
