@@ -6,15 +6,27 @@ részek jelentenek, lásd az ismert eltéréseknél.
 
 ## Állapot
 
-git hash-object eml2str.py -> 485b031f73e7d702b9070ecb205f21dd60ac1d49    (29291d4 2026-10-08 commit)
+Verzio:  git hash-object eml2str.py -> fb1e3d17285e3cc7c63e1a8f58a22effafadf2a6  (commit 7f35f7a)
 
-- **Junk.mbox** (2281 levél, 104,7 MB): a kimenet bájtra azonos a Pythonéval (`cmp`).
-- **Valódi korpusz** (13 150 levél, 6,8 GB): bájtra azonos (önálló programként és Python-modulként is).
-- **Differenciális fuzz** (`gen_fuzz.py`, 59 000 levél): valódi levelek mutációi, plusz szintetikus levelek RTF, ICS,
-  UTF-16/32, CJK, iso-2022, utf-7, hibás base64/QP, encoded-word fejlécek, HTML-entitások és egymásba ágyazott
-  multipart részekkel. A levelek kb. 1,5%-a tér el. Ezek mind CJK kódlapú részt tartalmaznak; egyetlen kivétel az
-  ismert utf-7 surrogate-eset.
-- **Sebesség** ezen a gépen (egy szálon): Python 3.9 **2,6 s**, Rust **0,16 s** a Junk.mbox-on, kb. **16×**.
+- **Valódi levelek** (13 150 levél, 6,8 GB) és **Junk.mbox** (2281 levél): a kimenet bájtra azonos a Pythonéval
+  (önálló programként és Python-modulként is).
+- **Junk-all.mbox** (30 270 spam, 1 GB): bájtra azonos, kivéve 23 CJK kódlapú levelet (lásd az ismert eltéréseket).
+- **Differenciális fuzz** (`gen_fuzz.py`, összesen kb. 90 000 levél): valódi levelek mutációi, plusz szintetikus levelek
+  RTF, ICS, UTF-16/32, CJK, iso-2022, utf-7, hibás base64/QP, encoded-word fejlécek, HTML-entitások, trükkös tagok
+  (`<id="x>`, `a=b=">"`, `<!x a="b>c">`…) és egymásba ágyazott multipart részekkel. A levelek kb. 1,5%-a tér el:
+  ezek mind CJK kódlapú részt tartalmaznak, egyetlen kivétel az ismert utf-7 surrogate-eset.
+- **Kimerítő tesztek** a `html2text` trükkös részeire (tagvég, comment, `style`, `opacity`): több százezer generált
+  HTML-darabon azonos.
+- **Sebesség** ezen a gépen (egy szálon, a Python oldalon is a mostani, optimalizált `eml2str.py`-vel):
+
+  | | valódi levelek (6,8 GB) | Junk-all (1 GB) |
+  |---|---|---|
+  | CPython 3.9 | 26,1 s | 19,0 s |
+  | CPython 3.14 | 21,2 s | 15,0 s |
+  | PyPy 3.12 | 14,8 s | 16,4 s |
+  | Rust | **3,4 s** | **2,5 s** |
+
+  A Rust a CPythonnál kb. 6–8×, a PyPy-nál kb. 4–7× gyorsabb. Több szálon (a modul elengedi a GIL-t) tovább skálázódik.
 
 ## Fordítás
 
@@ -64,9 +76,12 @@ A mért idő csak az `eml2str()` hívásoké, az mbox beolvasása nincs benne.
 ```bash
 python3 ../bench_py.py nagy.mbox py.out
 pypy3   ../bench_py.py nagy.mbox pypy.out
+EML2STR=eml2str_rs python3 ../bench_py.py nagy.mbox mod.out   # a Rust Python-modulon keresztül
 ./target/release/eml2str-bench nagy.mbox rs.out            # --repeat N: N-szer futtatja, átlagidő
 python3 ../compare_out.py py.out rs.out -v 5               # eltérések száma, az első 5 részletesen
 ```
+
+Az `EML2STR` változóval a `bench_py.py` tetszőleges, `eml2str()` függvényt adó modult mér (alapértelmezés: `eml2str`).
 
 Megjegyzések:
 
@@ -126,3 +141,23 @@ dekódolja.
 | `gen_fuzz.py` | fuzz-mbox generátor (`python3 gen_fuzz.py ../Junk.mbox fuzz.mbox 10000 <seed>`) |
 | `diag.py` | az eltérő levelek részeinek (ctyp / charset / cte) listázása |
 
+A Rust a Python logikáját követi, a Pythonban is meglévő optimalizálásokkal együtt: a `Content-Transfer-Encoding`
+dekódolás csak a ténylegesen felhasznált részekre fut le (`parse_eml(decode='lazy')`), a fejlécvég keresése egy menetben
+megy (`header_end()`), a `html2text` tagvég-keresése a HTML5 tokenizer szerinti állapotgép (a Python `TAG_END_RE`
+megfelelője, `src/html.rs: tag_end()`).
+
+## Karbantartás
+
+Ha az `eml2str.py`-ben az `eml2str()`-t érintő rész változik (`parse_eml`, `decode_payload`, `html2text`, `hdrdecode4`,
+a charset-kezelés…), a Rust oldalt is ugyanígy kell módosítani, utána ellenőrizni:
+
+```bash
+./build_python.sh                                     # vagy cargo build --release
+python3 ../bench_py.py teszt.mbox py.out
+./target/release/eml2str-bench teszt.mbox rs.out
+python3 ../compare_out.py py.out rs.out -v 5          # csak a CJK-eltérések maradhatnak
+python3 diag.py teszt.mbox py.out rs.out              # az eltérő levelek charsetjei
+```
+
+Érdemes egy friss fuzz-korpuszon is lefuttatni (`gen_fuzz.py`), új trükkök esetén a `HTML_BITS` listát bővítve.
+A codec-táblák a fordításkor automatikusan frissülnek (az `eml2str.py` aliasai és felülírásai is).
