@@ -896,29 +896,12 @@ def remove_spamtag(text):
     text=text.replace("[Outlook levélszemét-bejelentő]","").replace("[Outlook junk mail report]","") # Outlook
     return text
 
+# szo: betuk/szamjegyek (isalnum), es ASCII szamjegy utan a : - / . is (datum, telefonszam, idopont egyben marad)
+VOCAB_SPLIT_RE=re.compile(r'((?:[^\W_]+|(?<=[0-9])[:\-/.])+)')
+
 def vocab_split(preview):
-#    preview=remove_url(preview)
-    tok=[]
-    s=""
-    inw=False
-    for c in preview:
-#        if not c.isalpha(): # if c in '\n\t #".,!?;:_-+/*()[]{}0123456789':
-#        if not c.isalnum():
-        if not (c.isalnum() or (s and s[-1].isnumeric() and c in ":-/." )): # handle special case of date/phone numbers...
-            if inw:
-                tok.append(s)
-                s=c
-                inw=False
-                continue
-            s+=c
-            continue
-        if inw:
-            s+=c
-            continue
-        tok.append(s)
-        s=c
-        inw=True
-    tok.append(s)
+    tok=VOCAB_SPLIT_RE.split(preview)  # [elvalaszto, szo, elvalaszto, szo, ...]
+    if len(tok)>1 and tok[-1]=='': tok.pop()  # szoval vegzodo szovegnel nincs ures elvalaszto a vegen
     return tok
 
 

@@ -40,6 +40,7 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `ATTR_RE_CACHE` | `dict[str, re.Pattern]` | Az `html_extract_attr()` lefordított regex-cache-e. |
 | `TAG_RE3`, `TAG_RE4`, `TAG_RE6` | `re.Pattern` | URL, e-mail cím és `.hu` domain felismerő regexek (`remove_url()`). `TAG_RE5` (számok) definiálva, de nincs használva. |
 | `STAG_SA` | `re.Pattern` | SpamAssassin `*****SPAM{15.0}*****` jellegű tárgy-tag. |
+| `VOCAB_SPLIT_RE` | `re.Pattern` | A `vocab_split()` szó-tokenje: `isalnum` karakterek, ASCII számjegy után a `: - / .` is. |
 | `hdr_re` | `re.Pattern` | RFC 2047 encoded-word (`=?charset?Q|B?...?=`) felismerése. |
 | `param_re` | `re.Pattern` | RFC 2231 paraméternév-utótag (`*`, `*N`, `*N*`) felismerése (`rfc2231_decode()`). |
 | `from_re1`, `from_re2` | `re.Pattern` | `From:` fejléc formátumai: `"Név" <cím>` ill. `cím (Név)`. |
@@ -474,9 +475,11 @@ URL-ek, e-mail címek és `.hu` domainek lecserélése `<URL>`, `<EMAIL>`, `<DOM
 Szöveg tokenizálása szó / nem-szó darabokra úgy, hogy a darabok összefűzése visszaadja az eredetit.
 
 - `preview`: `str`
-- **Visszatérés:** `list[str]` – felváltva elválasztó (írásjel/whitespace) és szó (alfanumerikus)
-  tokenek; az első elem lehet üres string. Számok után a `: - / .` karakterek a tokenen belül
-  maradnak (dátumok, telefonszámok, időpontok egyben maradnak).
+- **Visszatérés:** `list[str]` – felváltva elválasztó (írásjel/whitespace) és szó (alfanumerikus, `isalnum()`)
+  tokenek; az első elem lehet üres string, szóval végződő szövegnél a végén nincs üres elválasztó. ASCII számjegy
+  (`0-9`) után a `: - / .` karakterek a tokenen belül maradnak (dátumok, telefonszámok, időpontok egyben maradnak:
+  `2026.10.12`, `12:30`, `06-1/234-5678`).
+- A `VOCAB_SPLIT_RE` regexszel dolgozik (`re.split`).
 
 ---
 
