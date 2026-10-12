@@ -15,6 +15,9 @@ from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,r
 from widechars import wcfixstr,ucsremove,is_cjk
 from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
 
+try:  from eml2str_rs import eml2str  # a gyors Rust valtozat, ha le van forditva (ugyanaz a kimenet)
+except ImportError: pass              # marad a Python eml2str
+
 ds=None
 geoip=None
 
