@@ -28,8 +28,15 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `charset_overrides` | `dict[str, str]` | Szándékos felülírások olyan nevekre, amiket a Python is ismer, de másképp dekódolna: a `latin1`/`iso-8859-1`/`us-ascii` → `windows-1252`, `iso-8859-9` → `windows-1254`, `gb2312` → `gbk`, `utf-16` → `utf-16le` stb. Csak a modul saját dekódolásainál érvényes, a `charset_name()`-en keresztül (globálisan nem írható át, mert pl. az `email` modul a pontos latin-1-re épít). |
 | `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
 | `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. |
+| `_FIX_TABLE` | `dict[int, str]` | Az `invalid_charrefs` `str.translate()`-hez (`fix_chars()`). |
+| `BOMS` | `tuple` | BOM → kódlap (`utf-8`, `utf-32-le/be`, `utf-16-le/be`; a `utf-32-le` a vele azonosan kezdődő `utf-16-le` előtt). A `decode_payload()` használja. |
+| `_ASCII_PROBE` | `bytes` | Próbaszöveg az `ascii_compatible()`-hez: a utf-7 (`+x-`), hz (`~~`), iso-2022 (`ESC $ B`) és utf-16/32 (páratlan hossz) mind elrontja. |
+| `_HU_U8` | `re.Pattern` | UTF-8 kódolt magyar ékezetes betűk (`ÁÉÍÓÖÚÜáéíóöúüŐőŰű`) az `is_utf8_mixed()`-hez. |
 | `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_font_re`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, a fonttábla `\fN` bejegyzéseit kereső regex (`rtf_font_codepages()`), és a nevesített írásjelek / szimbólumok leképezése. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
+| `TAG_END_RE` | `re.Pattern` | A tag végének keresése a HTML5 tokenizer szerint (lásd `html2text()`). |
+| `TAG_END_USE_RE` | `bool` | `True` CPythonban: a `html2text()` a `TAG_END_RE`-t használja. PyPy alatt `False`: ott ugyanez bájtonkénti ciklussal fut, mert a JIT-elt ciklus a gyorsabb. |
+| `OPACITY_RE` | `re.Pattern` | Az `opacity:` értéke (szám, opcionálisan `%`) az `opacity_hidden()`-hez. |
 | `ATTR_RE_CACHE` | `dict[str, re.Pattern]` | Az `html_extract_attr()` lefordított regex-cache-e. |
 | `TAG_RE3`, `TAG_RE4`, `TAG_RE6` | `re.Pattern` | URL, e-mail cím és `.hu` domain felismerő regexek (`remove_url()`). `TAG_RE5` (számok) definiálva, de nincs használva. |
 | `STAG_SA` | `re.Pattern` | SpamAssassin `*****SPAM{15.0}*****` jellegű tárgy-tag. |
@@ -39,7 +46,9 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 
 A modul betöltésekor regisztrálódik a **`"mixed"`** nevű codec hibakezelő (`codecs.register_error`),
 így bármely `bytes.decode(..., "mixed")` hívás a hibás bájtokat nem dobja el, hanem latin1/cp1252
-szerint (az `invalid_charrefs` táblával) karakterré alakítja.
+szerint (az `invalid_charrefs` táblával) karakterré alakítja. Ugyanígy működik a **`"mixed_iso8859-2"`** és a
+**`"mixed_cp1250"`** hibakezelő, csak ezeknél a felső fél (`A0–FF`) a latin2 ill. cp1250 szerint dekódolódik
+(`_mixed_factory()`); a `safe_decode()` használja őket a latin2 / cp1250 jelölésű, de UTF-8-at is tartalmazó szövegekhez.
 
 ---
 
@@ -58,8 +67,10 @@ A modul fő belépési pontja: nyers e-mailből kinyeri a "legjobb" szöveges t�
 > Ha `ds2=True`, de nincs (vagy üres) Subject, akkor is csak `str` jön vissza – ez szándékos,
 > a deepspam2 így várja.
 
-Működés: `parse_eml(decode=True)`-val MIME-fát épít, bejárja a leveleket (leaf part-okat), és a
-nem-csatolmány `text/*`, `application/ics`, TNEF és RTF részeket `decode_payload()`-dal dekódolja.
+Működés: `parse_eml(decode='lazy')`-val MIME-fát épít, bejárja a leveleket (leaf part-okat), és a
+nem-csatolmány `text/*`, `application/ics`, TNEF és RTF részeket `get_payload()`-dal (transfer-decoding) és
+`decode_payload()`-dal dekódolja. A többi rész (képek, zip, egyéb csatolmányok) base64 / QP dekódolása így el sem
+készül, ami csatolmány-nehéz leveleknél jelentős gyorsulás; az eredmény ugyanaz, mint `decode=True`-val.
 Heurisztika a választáshoz: a HTML / TNEF rész előnyt élvez (>20 karakter), egy későbbi rész
 felülírja az eddigit, ha legalább fele olyan hosszú, és a SpamAssassin riport ("Spam detection
 software,…") mindig felülíródik. Ha találunk 200 karakternél hosszabb HTML/TNEF szöveget, leáll.
@@ -91,7 +102,7 @@ Saját, rekurzív MIME parser. A `data`-t nem másolja, csak pozíciókkal (`p`,
 |---|---|---|
 | `data` | `bytes` | A teljes nyers üzenet. |
 | `debug` | `bool` | Részletes kiírás stdout-ra. |
-| `decode` | `bool` | Ha `True`, a leaf részeknél a transfer-encodingot (base64/QP) is dekódolja → `"payload"` kulcs. |
+| `decode` | `bool \| str` | Ha `True`, a leaf részeknél a transfer-encodingot (base64/QP) is dekódolja → `"payload"` kulcs. Ha `'lazy'`, csak megjegyzi a törzs helyét (`"_body"` kulcs), és a dekódolás a `get_payload()` hívásakor történik. |
 | `level` | `int` | Rekurziós mélység (belső használatra). |
 | `p`, `pend` | `int` | Az aktuális rész kezdő/záró pozíciója `data`-ban (`pend=-1` → `len(data)`). |
 
@@ -110,26 +121,50 @@ Saját, rekurzív MIME parser. A `data`-t nem másolja, csak pozíciókkal (`p`,
 | `disp` | `str \| None` | Content-Disposition (`attachment`, `inline`…). |
 | `name` | `str \| None` | Dekódolt fájlnév (`filename`, ennek hiányában `name`, mindkettő `ct_param()`-mal, tehát RFC 2231 és RFC 2047 szerint is); dekódolási hibánál `"EXC!"`. |
 | `parts` | `list[dict]` | Alrészek (`multipart/*` és `message/*` esetén), ugyanilyen szerkezettel. |
-| `payload` | `bytes` | Csak `decode=True` és leaf rész esetén: a transfer-decoded törzs. |
+| `payload` | `bytes` | Csak `decode=True` és leaf rész esetén: a transfer-decoded törzs. `decode='lazy'` esetén az első `get_payload()` hívás tölti ki. |
+| `_body` | `tuple[bytes, int, int]` | Csak `decode='lazy'` és leaf rész esetén: `(data, start, end)`, a még nem dekódolt törzs helye. |
 
 Toleráns a hibás levelekkel szemben (hiányzó záró boundary, boundary előtti fejlécek, CRLF/LF
 keverés stb.); a rendellenességeket `print()`-tel jelzi (`BoundaryNotFound:`, `PreBoundaryText:`…).
+A fejléc végét a `header_end()` keresi.
 
-### `readfolder(f, do_eml, keephdrs=['from','subject','x-deepspam','x-grey-ng'])`
-mbox formátumú (`From ` sorokkal elválasztott) postafiók-fájl gyors, soronkénti végigolvasása,
-teljes parse nélkül.
+### `get_payload(eml)`
+A `parse_eml(decode='lazy')` által adott rész transfer-decoded törzse.
+
+- `eml`: `dict` (egy `parse_eml()` rész)
+- **Visszatérés:** `bytes | None` – ha még nincs `"payload"`, de van `"_body"`, dekódolja (`decode_body()`) és el is
+  tárolja; `decode=True`-val épített részeknél a meglévő `"payload"`-ot adja.
+
+### `header_end(data, p, pend)`
+A fejléc vége a `data[p:pend]`-ben: `min(find(b'\n\n')+2, find(b'\r\n\r\n')+4)`, egyetlen menetben (a sorvégeken
+lépkedve). Ha nincs üres sor: `pend`.
+
+- **Visszatérés:** `tuple[int, bytes]` = `(hsize, newline)`, ahol `newline` `b'\n'` vagy `b'\r\n'`.
+
+> A korábbi két külön `find()` CRLF-es levélnél (ahol nincs `\n\n`) minden MIME-résznél a rész végéig keresett.
+
+### `readfolder(f, do_eml, keephdrs=['from','subject','x-deepspam','x-grey-ng'], getraw=False)`
+mbox formátumú (`From ` sorokkal elválasztott) postafiók-fájl gyors végigolvasása, teljes parse nélkül.
 
 | Paraméter | Típus | Leírás |
 |---|---|---|
-| `f` | bináris fájlobjektum | Pl. `open(path, 'rb')`; a `f.tell()`-től kezdi. |
-| `do_eml` | `Callable[[dict, int], Any]` | Callback, levelenként hívódik: `do_eml(eml, fpos_end)`, ahol `fpos_end` a levél végének fájlpozíciója. |
+| `f` | bináris fájlobjektum | Valódi (lemezen lévő) fájl, pl. `open(path, 'rb')`; a `f.tell()`-től kezdi. |
+| `do_eml` | `Callable[[dict, bytes \| int], Any]` | Callback, levelenként hívódik: `do_eml(eml, raw)`, ahol `raw` a teljes nyers levél (a `From ` sorral együtt), ha `getraw=True`, különben a levél mérete bájtban. |
 | `keephdrs` | `list[str]` | Mely fejléceket (kisbetűs névvel) tegye bele a dict-be. |
+| `getraw` | `bool` | Ha `True`, a callback a nyers levelet kapja (`bytes`), különben a méretét (`int`). |
 
 A callbacknek átadott `eml` dict kulcsai: `_fpos` (a levél kezdete), `_from` (a `From ` elválasztó
-sor), `_hsize` (fejlécméret), `_attach` (`True`, ha van `Content-Disposition: attachment` sor), valamint
+sor), `_hsize` (fejlécméret, ha volt a fejléc után üres sor), `_attach` (`True`, ha van `Content-Disposition: attachment` sor a törzsben), valamint
 a `keephdrs` szerinti fejlécek nyers (nem RFC2047-dekódolt) `str` értékkel.
 
-**Visszatérés:** `int` – az utolsó pozíció (= a folder fájl mérete).
+**Visszatérés:** `int` – a végpozíció (az indításkori fájlméret); a fájlpozíciót is ide állítja. Inkrementális
+feldolgozáshoz: a következő hívás `f.seek(ezzel)` után csak az azóta hozzáírt leveleket olvassa.
+
+Működés: `mmap`-pel képezi le a fájlt (csak a ténylegesen olvasott lapok töltődnek be), a leveleket `find()`-dal vágja
+szét, és soronként csak a fejléceket dolgozza fel (a törzset nem járja be). Megkötések:
+- az indításkori fájlméretig olvas; ami közben hozzáíródik, azt a következő hívás látja;
+- a fájlt futás közben nem szabad csonkolni (a leképezett, de megszűnt rész olvasása SIGBUS-t okoz);
+- pipe, `stdin`, `gzip.open()` stb. nem használható (nem leképezhető).
 
 ---
 
@@ -147,18 +182,21 @@ Egy (már transfer-decoded) MIME rész bájtjait alakítja végleges, tiszta Uni
 **Visszatérés:** `str`
 
 Lépések:
+0. BOM esetén az dönti el a kódlapot (`BOMS`), a BOM-ot levágja.
 1. Típus szerinti előfeldolgozás: `text/calendar`/`application/ics` → `parse_ics()`; DOCX → `parse_docx()`;
    TNEF → `parse_tnef_body()` (a HTML body-t a `tnef_mini` már `str`-ként adja, ezt UTF-8-ra kódolva → `html2text()`, charset `utf-8`; különben az RTF body a `parse_rtfhead()` szerinti
    kódlappal → `rtf_to_text_safe()`; ha ez is hibázik, a nyers TNEF adat marad);
-   HTML (vagy HTML-nek *látszó* text/plain) → charset felülírás a `<head>`-ből (`parse_htmlhead()`),
-   ISO-2022-* előzetes dekódolás, majd `html2text()`.
+   HTML (vagy HTML-nek *látszó* text/plain) → charset felülírás a `<head>`-ből (`parse_htmlhead()`, BOM esetén nem),
+   nem ASCII-kompatibilis kódlapnál (`ascii_compatible()`: iso-2022-*, utf-16/32, utf-7, hz) előzetes dekódolás
+   UTF-8-ra (`safe_decode(..., "ignore")`), majd `html2text()`.
 2. Charset feloldás: alapértelmezés `iso8859-1`, felülírások a `charset_name()` szerint (az aliasokat a codec-kereső kezeli).
    `application/rtf` esetén az RTF saját `\ansicpg`-je elsőbbséget kap (`parse_rtfhead()`).
-3. Dekódolás: ha `utf-8` vagy `is_utf8()` szerint annak tűnik → szigorú UTF-8, hiba esetén a
-   deklarált charset `"mixed"` hibakezelővel; ismeretlen codec esetén UTF-8 `"mixed"`-del.
+3. Dekódolás: ASCII-kompatibilis kódlapnál előbb szigorú UTF-8 (gyakran UTF-8 a más charsettel jelölt szöveg),
+   ha ez nem sikerül, vagy a kódlap nem ASCII-kompatibilis: `safe_decode()` (a deklarált kódlap `"mixed"`
+   hibakezelővel; latin1/2-nél UTF-8 + `mixed_*`, ha UTF-8 ékezetek vannak benne; ismeretlen codec: UTF-8 `"mixed"`).
 4. RTF esetén `rtf_to_text_safe()` (a `\'xx` escape-ek kódlapja `rtf_hex_encoding()` szerint), egyébként HTML
    entitások feloldása (`html.unescape`).
-5. Végül minden karakter átfut az `invalid_charrefs` táblán.
+5. Végül minden karakter átfut az `invalid_charrefs` táblán (`fix_chars()`).
 
 > A `tnef_support` flaget itt nem ellenőrzi, ez a hívó (`eml2str()`, `get_mimedata()`) feladata.
 > Az RTF konverzió striprtf nélkül is működik (`rtf_fallback_text()`), ezért az RTF részeket a hívók
@@ -190,15 +228,40 @@ Saját, gyors, toleráns HTML → szöveg konverter (bájt szinten dolgozik, a k
 - Ha a bemenetben nincs `<`: változatlanul adja vissza (`debug` esetén `(data, [data])`).
 
 Jellemzők:
+- A tag vége a HTML5 tokenizer szerint (`TAG_END_RE`, PyPy alatt és `debug` módban ugyanez bájtonként):
+  - whitespace: tab, LF, FF, CR, szóköz;
+  - a tag neve és az attribútumok neve whitespace-ig, `/`-ig vagy `>`-ig tart, a bennük lévő `=` és idézőjel nem
+    nyit semmit (pl. `<id="x>` az első `>`-nél zár);
+  - az attribútum neve után (whitespace után is) `=`, majd whitespace után az érték: `"idézett"`, `'idézett'` vagy
+    idézőjel nélküli; ez utóbbi whitespace-ig vagy `>`-ig tart, a benne lévő `=` és idézőjel sem nyit semmit
+    (`a=b=">"` és `a=="x>y"` az első `>`-nél zár);
+  - lezáratlan idézet vagy `>` hiánya: a data végéig;
+  - `<!...>`, `<?...>` és `</` + nem betű (bogus comment): mindig az első `>`-ig, idézőjelektől függetlenül.
+
+  Így a tag sehol sem tart tovább, mint a böngészőkben: a szűrő elől nem rejtünk el olyan szöveget, amit a levél
+  olvasója lát. `debug` módban a hibás helyen álló idézőjelekre warning íródik.
 - `<style>`, `<script>`, `<title>`, `<svg>`, `<annotation>` blokkok és HTML kommentek kihagyása, CDATA kezelése.
-- Rejtett szöveg felismerése (`display:none`, `font-size:0/1px`, `max-height:0`, `mso-hide:all`, `opacity:0`)
-  → kimarad; kivétel a levél eleji rejtett "preheader", ami `[...]` közé téve bekerül.
+  Lezáratlan komment (`<!--` után nincs `-->`): az első `>`-ig tart.
+- Rejtett szöveg felismerése a `style`-t tartalmazó tagokban (a vizsgálat előtt a tagból minden whitespace törlődik,
+  így a `display : none`, `display:\tnone` és a sortöréssel szétvágott – pl. a Postfix 990 karakteres tördelése miatt
+  `font-s\n ize:1px` – stílus is felismerődik): `display:none`, `font-size:0p…`/`1p…`, `max-height:0p…`,
+  `mso-hide:all`, `opacity` 0.5 alatt (`opacity_hidden()`). A tag utáni szöveg (a következő tagig) kimarad;
+  kivétel a levél eleji (még szöveg előtti) rejtett "preheader", ami `[...]` közé téve bekerül.
   MS Teams `signedadaptivecard` rejtett base64 adat kihagyva.
-- `div`, `p`, `br`, `tr` → sortörés; inline elemek (`span`, `a`, `b`, …) között nincs extra szóköz.
+- `div`, `p`, `br`, `tr` → sortörés; inline elemek (`span`, `a`, `b`, …) és a kommentek (`<!--…-->`, `<!…>`,
+  `<?…>`) nem tesznek szóközt (`vi<!-- x -->agra` → `viagra`), a többi tag szóközt tesz.
 - Felesleges whitespace összevonása, soronkénti strip.
 - A `LINK_ATTRS` szerinti linkek (sorrendtartó deduplikálással) a szöveg végére kerülnek
   `URL: <max. 128 karakter>` sorokként.
 - A HTML entitásokat itt **nem** oldja fel (azt a `decode_payload()` teszi dekódolás után).
+
+### `opacity_hidden(tag)`
+Az `opacity` alapú elrejtés: a tagban (CSS szerint az utolsó) `opacity:` értéke 0.5 alatt van-e (a `%` alak is).
+A spammerek halvány szöveggel rejtik el a szűrők megtévesztésére betett szöveget; a 0.5 és feletti érték (pl. 0.9)
+látható, és jellemzően éppen a spam fő szövege, ezért az nem számít rejtettnek.
+
+- `tag`: `bytes` (whitespace nélküli, kisbetűs tag); csak akkor hívódik, ha `b'opacity:' in tag`.
+- **Visszatérés:** `bool`
 
 ### `parse_rtfhead(data, charset=None)`
 Az RTF dekódolásához használandó kódlap.
@@ -286,6 +349,41 @@ Heurisztikus UTF-8 detektor: megszámolja a helyes és hibás többbájtos szekv
 - `s`: `bytes`
 - **Visszatérés:** `bool` – `True`, ha a helyes folytató bájtok száma > 4 × a hibák száma.
   (Tisztán ASCII bemenetre `False`.)
+- A modul jelenleg nem használja (a `decode_payload()` szigorú UTF-8 próbát és `safe_decode()`-ot használ).
+
+### `safe_decode(data, cs, errors="mixed")`
+Hibatűrő dekódolás a `cs` kódlappal.
+
+- `data`: `bytes`, `cs`: `str | None` (a `charset_name()` utáni név), `errors`: hibakezelő (`"mixed"` vagy `"ignore"`).
+- **Visszatérés:** `str`. Ha a kódlap nem létezik vagy nem használható (`LookupError`: `unknown-8bit`, `base64`…;
+  `UnicodeError`: `undefined`, `idna`), UTF-8 `"mixed"`-del dekódol. Latin1/2 (`cp1252`, `iso8859-1/2`, `cp1250`)
+  kódlapnál előbb szigorú UTF-8-at próbál, és ha az nem megy, de az `is_utf8_mixed()` szerint UTF-8 ékezetek vannak
+  benne (pl. levelezőlista-lábléc, idézett UTF-8 rész), hibatűrő UTF-8-at a `mixed_iso8859-2` / `mixed_cp1250` /
+  `mixed` hibakezelővel.
+
+### `ascii_compatible(cs)`
+Az ASCII bájtok ASCII karaktert jelentenek-e a `cs` kódlapban (a `html2text()` bájtokon dolgozik, ehhez kell).
+
+- **Visszatérés:** `bool` – ismeretlen kódlapra `True` (úgyis UTF-8 + `mixed` lesz belőle); utf-7, hz, iso-2022-*,
+  utf-16/32 esetén `False`.
+
+### `is_utf8_mixed(data, n=4)`
+Van-e legalább `n` db UTF-8 kódolt magyar ékezetes betű a `data`-ban (csak latin1/2 jelölésű szövegnél használja,
+más kódlapoknál tévesen is kijöhet).
+
+- **Visszatérés:** `bool`
+
+### `fix_chars(s)`
+Az `invalid_charrefs` csere a dekódolt szövegen (C1 → cp1252 írásjelek, `Õ Û õ û` → `Ő Ű ő ű`, nbsp, soft hyphen…),
+`str.translate()`-tel.
+
+- `s`: `str` → **Visszatérés:** `str`
+
+### `fix_surrogates(s)`
+Az RTF `\uN` párokból külön `chr()`-rel keletkezett surrogate-ok összevonása, a párosítatlanok U+FFFD-re (különben
+egy későbbi `.encode("utf-8")` kivételt dobna).
+
+- `s`: `str` → **Visszatérés:** `str`
 
 ### `mixed_decoder(unicode_error)`
 A `"mixed"` codec hibakezelő implementációja (közvetlenül nem kell hívni).
@@ -381,6 +479,14 @@ Szöveg tokenizálása szó / nem-szó darabokra úgy, hogy a darabok összefűz
   maradnak (dátumok, telefonszámok, időpontok egyben maradnak).
 
 ---
+
+## Rust változat (eml2str_rs)
+
+Az `eml2str()` Rust portja az `eml2str-rs/` könyvtárban van, Python-modulként is használható
+(`from eml2str_rs import eml2str`, ugyanaz a hívás, visszatérési érték és kivételtípusok). A kimenete bájtra azonos a
+Python változatéval, kivéve néhány CJK kódlapú szélső esetet; részletek, fordítás és benchmark:
+`eml2str-rs/README.md`. A `deepspam4.py` a Rust modult használja, ha megtalálja.
+Ha az `eml2str.py` `eml2str()`-t érintő részei változnak, a Rust oldalt is módosítani kell.
 
 ## Tipikus használat
 
