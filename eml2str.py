@@ -408,7 +408,8 @@ def rtf_fallback_text(text,encoding="cp1252"):
       elif word in rtf_special_words: out.append(rtf_special_words[word])
       elif word=='uc' and arg: ucskip=int(arg)
       elif word=='u' and arg:
-        c=int(arg); out.append(chr(c+0x10000 if c<0 else c)); curskip=ucskip
+        c=int(arg); c=c+0x10000 if c<0 else c  # a szabvany szerint elojeles 16 bites szam
+        out.append(chr(c) if 0<=c<=0x10FFFF else "\ufffd"); curskip=ucskip  # tartomanyon kivul (pl. \u9999999999): ne dobjon kivetelt
     elif sym:
       if sym=='*' and first: skip=True; star=True; group_start=True  # a kovetkezo szo meg a csoport "elso" szava
       elif not skip and sym in rtf_special_syms: out.append(rtf_special_syms[sym])
