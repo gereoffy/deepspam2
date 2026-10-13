@@ -106,7 +106,7 @@ Kiemelések: **inverz** = kurzor, **félkövér** = kijelölt (selected), **halv
 |---|---|---|
 | `D` | `d` → `D+` → `D` | 3 állás: törölt jelöltek **elrejtve** (alap) → **mind** látszik → **csak a törölt** jelöltek |
 | `?` | `S+` → `S` → `s` | 3 állás: **mind** (alap) → **csak kijelöltek** → **csak nem kijelöltek** |
-| `H` | `H` / `h` | duplikátumok elrejtése be/ki (**alapból BE**: csak az eredetiek látszanak) |
+| `H` | `H` / `h` | másolatok elrejtése be/ki (**alapból BE**). Minden másolatot elrejt, függetlenül attól, hogy az eredetije látszik-e vagy törölt-e – a cél, hogy a dedup után a másolatokkal már egyáltalán ne kelljen foglalkozni |
 | `A` | `A` / `a` | csak a csatolmányos levelek |
 | `E` | `E` / `e` | csak az „extra” jelöltek |
 
@@ -232,7 +232,7 @@ j>50
 
 1. `python3 mailer4.py spam.mbox`
 2. `P` – szövegek kinyerése (és DeepSpam értékek), ez a `.text`-be mentődik
-3. `h` → pl. *Sanitized match* – duplikátumok szűrése (a `H` alapból rejti őket)
+3. `h` → pl. *Sanitized match* – dedup a munkafolyamat elején; a `H` alapból rejti a másolatokat, így a továbbiakban azok kimaradnak minden műveletből
 4. Szemét kiszórása: pl. `+` → `w<5` (túl rövidek), `+` → `j>20` (CJK), aztán `?` (csak kijelöltek) → átnézés → `d` → `Y`, majd `*` (kijelölések törlése, vissza mind nézetre). Megjegyzés: a `d` után a törölt levelek eltűnnek a listából, ezért a `*` rájuk már nem hat, kijelölve maradnak (a `D` szűrővel visszahozva látszik)
 5. Végső válogatás jelöléssel, aztán `?`-lel a megfelelő nézet, és `t` → `SPAM`/`PHIS`/`HAM` export, vagy `[` mbox export
 6. `q` – kilépés, jelölők mentése
@@ -250,7 +250,6 @@ Ami **nem** csak a látható levelekre hat, vagy a rejtettekre is tekintettel va
 | Mi | Viselkedés |
 |---|---|
 | `h` dedup | minden levelet vizsgál, csak a törlésre jelölteket hagyja ki. A törölt jelölt levelek régi dedup-értéke megmarad (nem nullázódik). |
-| `H` szűrő + más szűrő | mivel a dedup a rejtett levelekre is kiterjed, egy másolat akkor is rejtve marad, ha az eredetije egy másik szűrő miatt nem látszik. Pl. `?` „csak kijelöltek” nézetben egy kijelölt másolat, amelynek az eredetije nincs kijelölve, **egyáltalán nem jelenik meg**; a csoport tehát akár teljesen eltűnhet a listából. Ilyenkor `H`-val kapcsold ki a duplikátum-rejtést. |
 | `P` preview generálás | minden levél szövegét kinyeri (törölteket, rejtetteket is) és menti a `.text`-be |
 | DeepSpam induláskor | a `.text` alapján minden levélre kiszámolja |
 | `dup:N` a fejlécben, `h<op>szám` keresés | a duplikátumcsoport méretébe a rejtett példányok is beleszámítanak; a fejlécben mutatott eredeti sorszáma lehet rejtett levél is |
