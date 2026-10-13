@@ -6,7 +6,7 @@ import sys
 import time
 import pickle
 import traceback
-import bisect
+import collections
 
 from difflib import SequenceMatcher
 #from cdifflib import CSequenceMatcher as SequenceMatcher
@@ -565,13 +565,12 @@ while True:
     if ch=='h': #  Hide duplicates?
         sel=box_message(["Hide duplicates?","Exact match","Sanitized match","Vocab words only","Vocab words (5:100)","First 100 words","Words 10:100","SequenceMatcher"],y=1)
         if sel<1: continue
-        hash_dupes={}
-        by_len=[]   # sel==7: az eddigi egyedi levelek (tokenszam, index, tokenek), tokenszam szerint rendezve
 #        mails_dedup=[-1]*num_mails # kell ez?
         t0=time.time(); n_diffs=0
+        hash_dupes={}
+        if sel==7: eid={}; freq=collections.Counter(); toks_of={}; ids_of={}  # az egyedi levelek tokenjei (index szerint)
         for i in range(num_mails):
-            if (i%(100 if sel==7 else 1000))==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes)),
-                "%5.3f sec / %d ns/diff"%(time.time()-t0,(time.time()-t0)*1000000/n_diffs if n_diffs else 0 ) ])
+            if (i%1000)==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes)),"%5.3f sec"%(time.time()-t0)])
             if mails_flag[i] & MAILFLAG_DEL: continue # ignore already deleted emails!
             preview=get_preview(i)
             if sel>1: preview=remove_url(preview).lower()
@@ -584,24 +583,49 @@ while True:
                 j=hash_dupes[preview]
                 mails_dedup[j]-=1; mails_dedup[i]=j
             except KeyError:
-                if sel==7: # calc diff!
-                    j=-1
-                    toks=vocab_split(preview); n=len(toks)   # levelenkent csak egyszer (a tokeneket a by_len tarolja)
-                    # real_quick_ratio = 2*min(la,lb)/(la+lb) >= 0.95 csak hasonlo hosszuaknal teljesulhet:
-                    # a hossz-ablakon (0.9-1.12x, a pontos hatar ~0.905-1.105x) kivulieket meg sem nezzuk
-                    lo=bisect.bisect_left(by_len,(int(n*0.9),)); hi=bisect.bisect_right(by_len,(int(n*1.12)+1,))
-                    cand=sorted(by_len[lo:hi], key=lambda x: x[1])  # erkezesi sorrendben, mint eddig: ugyanaz az elso talalat
-                    if cand:
-                        dups=SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
-                        dups.set_seq2(toks)           # use set_seq2() to set the commonly used sequence once...
-                        for la,jj,t in cand:
-                            dups.set_seq1(t); n_diffs+=1  # ...and call set_seq1() repeatedly, once for each of the other sequences.
-                            if dups.real_quick_ratio()>=0.95 and dups.quick_ratio()>=0.95 and dups.ratio()>=0.95: j=jj; break # base email index
-                    if j>=0: mails_dedup[j]-=1; mails_dedup[i]=j; continue  # found a match!
-                    bisect.insort(by_len,(n,i,toks))
                 # no match, this is a new uniqe mail!
                 hash_dupes[preview]=i; mails_dedup[i]=-1
-        del hash_dupes, by_len
+                if sel==7: # a kozel-duplikatumokat a 2. menet keresi, itt csak tokenizalunk: (token, hanyadik elofordulas) -> elem-azonosito
+                    toks=vocab_split(preview); seen={}; ids=[]
+                    for tok in toks:
+                        occ=seen.get(tok,0); seen[tok]=occ+1
+                        ids.append(eid.setdefault((tok,occ),len(eid)))
+                    toks_of[i]=toks; ids_of[i]=ids; freq.update(ids)
+        del hash_dupes
+        if sel==7:
+            # 2. menet: kozel-duplikatumok (SequenceMatcher ratio >= 0.95) az 1. menet egyedi levelei kozott, prefix-szuressel
+            # (AllPairs). A quick_ratio a tokenek multihalmazanak atfedese; ezt az elemhalmazok metszetevel szamoljuk. Ha ket
+            # level quick_ratio-ja >= 0.95, akkor kozos elemuk legalabb ceil(19/21*n), igy a ritkasag szerint rendezett
+            # elemlistaik elso n-ceil(19/21*n)+1 eleme (prefix) biztosan metszi egymast: eleg a prefix-elemekre indexelni, es
+            # csak a kozos prefix-elemu korabbi leveleket vizsgalni. Az eredmeny ugyanaz, mintha minden korabbi egyedi
+            # levellel osszehasonlitanank.
+            del eid
+            index=collections.defaultdict(list)  # prefix-elem -> az egyedi (alap) levelek indexei
+            uniq={}                              # alap level indexe -> elemhalmaz
+            for nu,i in enumerate(toks_of):      # index szerinti sorrendben
+                if (nu%100)==0: box_message(["comparing emails...","","%10d/%d (%d)"%(nu,len(toks_of),len(uniq)),
+                    "%5.3f sec / %d ns/diff"%(time.time()-t0,(time.time()-t0)*1000000/n_diffs if n_diffs else 0 ) ])
+                j=-1
+                toks=toks_of[i]; ntok=len(toks); ids=ids_of[i]; eset=frozenset(ids)
+                pre=sorted(ids, key=lambda el: (freq[el],el))[:ntok-(19*ntok+20)//21+2]  # prefix (+1 a lebegopontos kerekites miatt)
+                dups=None
+                for jj in sorted({jj for el in pre for jj in index.get(el,())}):  # erkezesi sorrendben: ugyanaz az elso talalat
+                    jtoks=toks_of[jj]; jlen=len(jtoks); n_diffs+=1
+                    if 2.0*min(jlen,ntok)/(jlen+ntok)<0.95: continue      # = real_quick_ratio()
+                    if 2.0*len(eset & uniq[jj])/(jlen+ntok)<0.95: continue  # = quick_ratio() (multihalmaz-atfedes)
+                    if dups is None: dups=SequenceMatcher(); dups.set_seq2(toks)  # computes and caches detailed information about the second sequence
+                    dups.set_seq1(jtoks)
+                    if dups.ratio()>=0.95: j=jj; break                    # base email index
+                if j>=0: # found a match! i es a pontos masolatai (mails_dedup[i] = -(1+masolatok)) mind j duplikatumai
+                    mails_dedup[j]+=mails_dedup[i]; mails_dedup[i]=j; continue
+                for el in pre: index[el].append(i)
+                uniq[i]=eset
+            # i pontos masolatai meg i-re mutatnak: ha i kozel-duplikatum lett, az alap levelere iranyitjuk at
+            for k in range(num_mails):
+                if mails_flag[k] & MAILFLAG_DEL: continue
+                b=mails_dedup[k]
+                if b>=0 and mails_dedup[b]>=0: mails_dedup[k]=mails_dedup[b]
+            del toks_of, ids_of, freq, index, uniq
         with open(fnev+".dedup","wb") as f: pickle.dump(mails_dedup, f)
 
 
