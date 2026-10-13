@@ -567,21 +567,23 @@ while True:
         if sel<1: continue
 #        mails_dedup=[-1]*num_mails # kell ez?
         t0=time.time(); n_diffs=0
+        n_live=n_empty=n_exact=n_fuzzy=0  # osszesiteshez: nem torolt, ures, pontos egyezes (1. kor), fuzzy egyezes (2. kor)
         hash_dupes={}
         if sel==7: eid={}; freq=collections.Counter(); toks_of={}; ids_of={}  # az egyedi levelek tokenjei (index szerint)
         for i in range(num_mails):
             if (i%1000)==0: box_message(["comparing emails...","","%10d/%d (%d)"%(i,num_mails,len(hash_dupes)),"%5.3f sec"%(time.time()-t0)])
             if mails_flag[i] & MAILFLAG_DEL: continue # ignore already deleted emails!
+            n_live+=1
             preview=get_preview(i)
             if sel>1: preview=remove_url(preview).lower()
             if sel==3: preview=" ".join([t for t in vocab_split(preview) if t in vocab])
             if sel==4: preview=" ".join([t for t in vocab_split(preview) if t in vocab][5:100])
             if sel==5: preview=" ".join(preview.split()[:100])
             if sel==6: preview=" ".join(preview.split()[10:100])
-            if not preview: mails_dedup[i]=-1; continue # no data...
+            if not preview: mails_dedup[i]=-1; n_empty+=1; continue # no data...
             try:
                 j=hash_dupes[preview]
-                mails_dedup[j]-=1; mails_dedup[i]=j
+                mails_dedup[j]-=1; mails_dedup[i]=j; n_exact+=1
             except KeyError:
                 # no match, this is a new uniqe mail!
                 hash_dupes[preview]=i; mails_dedup[i]=-1
@@ -603,7 +605,7 @@ while True:
             index=collections.defaultdict(list)  # prefix-elem -> az egyedi (alap) levelek indexei
             uniq={}                              # alap level indexe -> elemhalmaz
             for nu,i in enumerate(toks_of):      # index szerinti sorrendben
-                if (nu%100)==0: box_message(["comparing emails...","","%10d/%d (%d)"%(nu,len(toks_of),len(uniq)),
+                if (nu%100)==0: box_message(["fuzzy-comparing emails...","","%10d/%d (%d)"%(nu,len(toks_of),len(uniq)),
                     "%5.3f sec / %d ns/diff"%(time.time()-t0,(time.time()-t0)*1000000/n_diffs if n_diffs else 0 ) ])
                 j=-1
                 toks=toks_of[i]; ntok=len(toks); ids=ids_of[i]; eset=frozenset(ids)
@@ -617,7 +619,7 @@ while True:
                     dups.set_seq1(jtoks)
                     if dups.ratio()>=0.95: j=jj; break                    # base email index
                 if j>=0: # found a match! i es a pontos masolatai (mails_dedup[i] = -(1+masolatok)) mind j duplikatumai
-                    mails_dedup[j]+=mails_dedup[i]; mails_dedup[i]=j; continue
+                    mails_dedup[j]+=mails_dedup[i]; mails_dedup[i]=j; n_fuzzy+=1; continue
                 for el in pre: index[el].append(i)
                 uniq[i]=eset
             # i pontos masolatai meg i-re mutatnak: ha i kozel-duplikatum lett, az alap levelere iranyitjuk at
@@ -627,6 +629,14 @@ while True:
                 if b>=0 and mails_dedup[b]>=0: mails_dedup[k]=mails_dedup[b]
             del toks_of, ids_of, freq, index, uniq
         with open(fnev+".dedup","wb") as f: pickle.dump(mails_dedup, f)
+        # osszesites (a szazalekok a nem torolt levelekhez kepest)
+        line=lambda label,n: "%-21s %7d  %5.1f%%"%(label,n,100.0*n/n_live if n_live else 0.0)
+        n_uniq=n_live-n_empty-n_exact-n_fuzzy
+        summary=["Duplicates found in %d emails (%.1f sec):"%(n_live,time.time()-t0),"",line("exact match:",n_exact)]
+        if sel==7: summary+=[line("fuzzy match (>=95%):",n_fuzzy),line("duplicates total:",n_exact+n_fuzzy)]
+        summary+=[line("unique:",n_uniq)]
+        if n_empty: summary+=[line("empty (no text):",n_empty)]
+        box_message(summary,y=0)
 
 
     if ch=='enter':
