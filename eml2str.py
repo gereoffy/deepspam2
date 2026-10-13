@@ -380,6 +380,7 @@ def rtf_fallback_text(text,encoding="cp1252"):
   fonts=rtf_font_codepages(text)
   out=[]; hexes=[]; skip=False; stack=[]; group_start=False; star=False; ucskip=1; curskip=0
   font=deff=None
+  depth=0; in_document=False  # a dokumentum (a legkulso csoport) bezarasa utan vege, mint a striprtf-ben
   pos=0; n=len(text)
   while pos<n:
     m=rtf_token_re.match(text,pos)
@@ -390,9 +391,11 @@ def rtf_fallback_text(text,encoding="cp1252"):
       out.append(bytes.fromhex(''.join(hexes)).decode(fonts.get(font,encoding),'ignore')); hexes=[]
     after_star,star=star,False
     if brace=='{':
-      stack.append((skip,ucskip,font)); group_start=True; continue
+      stack.append((skip,ucskip,font)); group_start=True; depth+=1; in_document=True; continue
     if brace=='}':
       if stack: skip,ucskip,font=stack.pop()
+      depth-=1
+      if in_document and depth<=0: break  # a zaro } utani resz nem a dokumentum resze (pl. a TNEF RTF vegi NUL bajtja)
       group_start=False; continue
     first,group_start=group_start,False
     if word:
