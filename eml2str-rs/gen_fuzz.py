@@ -58,6 +58,7 @@ def body_rtf():
         '\\bin4 {}}x', '\\\\', '\\{', '\\}', '\\~', '\\_', '\\-', '\r\n', 'szoveg ', rtext(2) + ' ', '}', '{', '\\', '\\x12345678901 ',
         '\\abcdefghijklmnopqrstuvwxyzabcdefghij ', '\\u1114112?', '\\u-70000?', "\\'zz"]
     s = bits[0] + ''.join(rnd.choice(bits[1:]) for _ in range(rnd.randint(3, 40))) + '}'
+    s += rnd.choice(['', '', '\x00', ' utana szoveg', '}{\\b x}', '\r\n{masodik}'])  # a dokumentum vege utani resz (pl. TNEF NUL)
     return enc_text(s, rnd.choice(['utf-8', 'cp1250', 'latin-1']))
 
 def body_ics():

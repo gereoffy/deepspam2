@@ -3,7 +3,7 @@
 //! a kivetel-tipusok (ValueError, UnicodeError...), mint a Python valtozatban. A feldolgozas alatt a GIL el van
 //! engedve, igy tobb szalon parhuzamosan futhat.
 
-use pyo3::exceptions::{PyIndexError, PyRecursionError, PyRuntimeError, PyTypeError, PyUnicodeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyTypeError, PyUnicodeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyString, PyTuple};
 
@@ -13,7 +13,6 @@ fn to_pyerr(name: &'static str) -> PyErr {
         "UnicodeError" => PyUnicodeError::new_err("eml2str_rs: UnicodeError"),
         "TypeError" => PyTypeError::new_err("eml2str_rs: TypeError"),
         "IndexError" => PyIndexError::new_err("eml2str_rs: IndexError"),
-        "RecursionError" => PyRecursionError::new_err("maximum recursion depth exceeded"),
         other => PyRuntimeError::new_err(format!("eml2str_rs: {other}")),
     }
 }

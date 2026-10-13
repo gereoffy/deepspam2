@@ -6,8 +6,6 @@ részek jelentenek, lásd az ismert eltéréseknél.
 
 ## Állapot
 
-Verzio:  git hash-object eml2str.py -> fb1e3d17285e3cc7c63e1a8f58a22effafadf2a6  (commit 7f35f7a)
-
 - **Valódi levelek** (13 150 levél, 6,8 GB) és **Junk.mbox** (2281 levél): a kimenet bájtra azonos a Pythonéval
   (önálló programként és Python-modulként is).
 - **Junk-all.mbox** (30 270 spam, 1 GB): bájtra azonos, kivéve 23 CJK kódlapú levelet (lásd az ismert eltéréseket).
@@ -93,14 +91,18 @@ Megjegyzések:
 
 ## Ismert eltérések a Pythontól
 
+A MIME-fa mélysége mindkét változatban 10 szintre van korlátozva (`MAX_MIME_DEPTH` / `MAX_DEPTH`): az ennél mélyebb
+multipart / message részek nem bomlanak tovább, a tartalmuk kimarad. (Korlát nélkül a Python egy ~1000 szint mélyen
+egymásba ágyazott levélen `RecursionError`-t, sőt fatális `Cannot recover from stack overflow` hibát adott.)
+
 | Eset | Python | Rust |
 |---|---|---|
 | utf-7 szöveg, benne magában álló surrogate (`+2D3-`) | a str-ben marad a lone surrogate | U+FFFD (a Rust `String` nem tud surrogate-ot tárolni) |
-| nagyon mélyen (kb. 1000 szint) egymásba ágyazott MIME | `RecursionError` a hívási mélységtől függő ponton | `RecursionError` fix 990 szintnél |
 | CJK kódlap (gbk, gb18030, big5, shift_jis, euc-jp, euc-kr, iso-2022-jp...), érvényes bájtsorozat | dekódolja | ugyanaz (encoding_rs) |
 | CJK kódlap, hibás bájtsorozat | a CPython CJK-dekóderének hibahatárai | az encoding_rs (WHATWG) hibahatárai, így más bájtokra jut a `mixed` csere |
 | ritka CJK változatok (shift_jis_2004, euc-jisx0213, iso-2022-jp-2/2004/3, big5hkscs) | a saját kiterjesztéseikkel | az alap kódlapként (shift_jis, euc-jp, iso-2022-jp, big5) |
 | `hz`, `johab`, `iso-2022-kr`, `raw-unicode-escape`, `unicode-escape`, `punycode` mint charset | dekódolja | utf-8 + mixed visszaesés |
+| RTF `\fcharsetN` → `johab` (130) a `\'xx` escape-ekhez | johab szerint dekódolja | a dokumentum kódlapja (`\ansicpg` / charset / cp1252) szerint |
 
 A CJK-eltérések szándékosak: a deepspam2 tokenizere a nem latin karaktereket úgyis eldobja, a valódi korpuszban
 pedig nem fordult elő CJK charset. Pontos CJK-táblák helyett ezért az encoding_rs crate dekódol (a Firefox

@@ -231,14 +231,11 @@ fn header_end(data: &[u8], p0: usize, pend: usize) -> usize {
     pend
 }
 
-/// a Python rekurzios limit (1000) kozelitese
-const MAX_DEPTH: usize = 990;
+/// a MIME-fa legnagyobb melysege (eml2str.MAX_MIME_DEPTH): ennel melyebben a multipart / message reszeket nem bontjuk tovabb
+const MAX_DEPTH: usize = 10;
 
 /// parse_eml(data, decode=True, level, p, pend)
 pub fn parse_eml(data: &[u8], level: usize, p0: usize, pend: usize) -> Result<Eml<'_>, PyErr> {
-    if level > MAX_DEPTH {
-        return Err(PyErr("RecursionError"));
-    }
     let hsize = header_end(data, p0, pend);
 
     let mut headers: Vec<Vec<u8>> = Vec::new();
@@ -307,7 +304,7 @@ pub fn parse_eml(data: &[u8], level: usize, p0: usize, pend: usize) -> Result<Em
     };
 
     let boundary = ct.get(b"boundary");
-    if boundary.is_some() && ctyp.starts_with("multipart/") {
+    if level < MAX_DEPTH && boundary.is_some() && ctyp.starts_with("multipart/") {
         let mut bo = b"--".to_vec();
         bo.extend_from_slice(boundary.unwrap());
         let mut q = hsize;
@@ -359,7 +356,7 @@ pub fn parse_eml(data: &[u8], level: usize, p0: usize, pend: usize) -> Result<Em
                 first = false;
             }
         }
-    } else if ctyp.starts_with("message/") {
+    } else if level < MAX_DEPTH && ctyp.starts_with("message/") {
         eml.parts.push(parse_eml(data, level + 1, hsize, pend)?);
     } else {
         let body = if hsize <= pend { &data[hsize..pend] } else { &b""[..] };

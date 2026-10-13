@@ -1,6 +1,6 @@
 //! RTF: parse_rtfhead, rtf_hex_encoding, rtf_fallback_text (a striprtf nelkuli durva kinyero), fix_surrogates
 
-use crate::codec::{decode_name, lookup, Errors};
+use crate::codec::{decode_name, lookup, Errors, Kind};
 use crate::util::find;
 use regex::Regex;
 use std::collections::HashMap;
@@ -247,7 +247,13 @@ impl PyStr {
 }
 
 fn flush_hex(out: &mut PyStr, hexes: &mut Vec<u8>, fonts: &HashMap<String, &'static str>, font: &Option<String>, encoding: &str) -> Result<(), PyErr> {
-    let cp = font.as_ref().and_then(|f| fonts.get(f).copied()).unwrap_or(encoding);
+    let mut cp = font.as_ref().and_then(|f| fonts.get(f).copied()).unwrap_or(encoding);
+    // a font kodlapja nalunk nincs implementalva (johab, \fcharset130): a Python dekodolja, mi a dokumentum kodlapjara
+    // esunk vissza (kivetel helyett; a szoveg CJK, a tokenizer ugyis eldobja)
+    if lookup(cp).map_or(false, |c| matches!(c.kind, Kind::Unsupported)) {
+        // (ha a dokumentum kodlapja sem dekodol, pl. idna: cp1252, hogy ne dobjunk kivetelt ott, ahol a Python nem)
+        cp = if lookup(encoding).map_or(false, |c| matches!(c.kind, Kind::Undefined | Kind::NotText | Kind::Unsupported)) { "cp1252" } else { encoding };
+    }
     // a Pythonban itt nincs try: pl. az idna codec UnicodeError-ja kifut az eml2str()-bol
     let s = decode_name(hexes, cp, Errors::Ignore).map_err(|_| PyErr("UnicodeError"))?;
     out.push_str(&s);
@@ -278,6 +284,8 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
     let mut curskip: i64 = 0;
     let mut font: Option<String> = None;
     let mut deff: Option<String> = None;
+    let mut depth: i64 = 0; // a csoportok melysege (egy nyito { elotti } miatt negativ is lehet, mint a Pythonban)
+    let mut in_document = false;
     let mut pos = 0usize;
     let n = text.len();
     while pos < n {
@@ -293,6 +301,8 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
             Tok::Open => {
                 stack.push((skip, ucskip, font.clone()));
                 group_start = true;
+                depth += 1;
+                in_document = true;
                 continue;
             }
             Tok::Close => {
@@ -300,6 +310,10 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
                     skip = s;
                     ucskip = u;
                     font = f;
+                }
+                depth -= 1;
+                if in_document && depth <= 0 {
+                    break; // a dokumentum (a legkulso csoport) vege: a zaro } utani resz nem a dokumentum resze
                 }
                 group_start = false;
                 continue;
@@ -341,11 +355,9 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
                     ucskip = py_int(arg.unwrap()).unwrap_or(0);
                 } else if word == "u" && arg.is_some() {
                     let c = py_int(arg.unwrap()).unwrap_or(0);
-                    let c = if c < 0 { c + 0x10000 } else { c };
-                    if !(0..=0x10ffff).contains(&c) {
-                        return Err(PyErr("ValueError"));
-                    }
-                    out.0.push(c as u32);
+                    let c = if c < 0 { c + 0x10000 } else { c }; // a szabvany szerint elojeles 16 bites szam
+                    // tartomanyon kivul (pl. 香999999): U+FFFD, nem dob kivetelt (mint a Pythonban)
+                    out.0.push(if (0..=0x10ffff).contains(&c) { c as u32 } else { 0xfffd });
                     curskip = ucskip;
                 }
             }
