@@ -42,6 +42,7 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `STAG_SA` | `re.Pattern` | SpamAssassin `*****SPAM{15.0}*****` jellegű tárgy-tag. |
 | `VOCAB_SPLIT_RE` | `re.Pattern` | A `vocab_split()` szó-tokenje: `isalnum` karakterek, ASCII számjegy után a `: - / .` is. |
 | `hdr_re` | `re.Pattern` | RFC 2047 encoded-word (`=?charset?Q|B?...?=`) felismerése. |
+| `MAX_MIME_DEPTH` | `int` | A MIME-fa legnagyobb mélysége (10): ennél mélyebben a `parse_eml()` a multipart / message részeket nem bontja tovább. |
 | `param_re` | `re.Pattern` | RFC 2231 paraméternév-utótag (`*`, `*N`, `*N*`) felismerése (`rfc2231_decode()`). |
 | `from_re1`, `from_re2` | `re.Pattern` | `From:` fejléc formátumai: `"Név" <cím>` ill. `cím (Név)`. |
 
@@ -104,7 +105,7 @@ Saját, rekurzív MIME parser. A `data`-t nem másolja, csak pozíciókkal (`p`,
 | `data` | `bytes` | A teljes nyers üzenet. |
 | `debug` | `bool` | Részletes kiírás stdout-ra. |
 | `decode` | `bool \| str` | Ha `True`, a leaf részeknél a transfer-encodingot (base64/QP) is dekódolja → `"payload"` kulcs. Ha `'lazy'`, csak megjegyzi a törzs helyét (`"_body"` kulcs), és a dekódolás a `get_payload()` hívásakor történik. |
-| `level` | `int` | Rekurziós mélység (belső használatra). |
+| `level` | `int` | Rekurziós mélység (belső használatra). `MAX_MIME_DEPTH` (10) felett a multipart / message részeket már nem bontja tovább: egyszerű (nem szöveges) részként kezeli őket. |
 | `p`, `pend` | `int` | Az aktuális rész kezdő/záró pozíciója `data`-ban (`pend=-1` → `len(data)`). |
 
 **Visszatérés:** `dict` az alábbi kulcsokkal:
@@ -295,7 +296,10 @@ Beépített, függőség nélküli, egymenetes RTF → szöveg kinyerő (tartal�
   A `\*\shpinst` és `\*\do` (szövegdobozok, régi rajzobjektumok) szövege bekerül, a `\shprslt`-másolat nem.
 - A `\'xx` escape-eket az aktuális font `\fcharset`-je (`rtf_font_codepages()`), ennek hiányában az `encoding`
   szerint dekódolja (az egymás utáni bájtokat együtt, így a többbájtos kódlapok is működnek); a `\uN` → Unicode
-  karakter, a `\ucN` szerinti helyettesítő karakterek kimaradnak.
+  karakter (negatív N: +65536; a tartományon kívüli, pl. `\u9999999999` U+FFFD lesz, kivétel nélkül), a `\ucN`
+  szerinti helyettesítő karakterek kimaradnak.
+- A legkülső csoport bezárásával a dokumentumnak vége (mint a striprtf-ben): a záró `}` utáni rész (pl. a TNEF-ből
+  jövő RTF végi NUL bájt) már nem kerül a szövegbe.
 - `\par`, `\line`, `\row`… → sortörés, `\tab`, `\cell` → tab, a nevesített írásjelek (`\emdash`,
   `\lquote`…) és szimbólumok (`\~`, `\_`, `\{`…) karakterré alakulnak, minden más vezérlőszó kimarad.
 - `\binN` után pontosan N karaktert átugrik (a bináris adatban kapcsos zárójel is lehet).
