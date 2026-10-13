@@ -982,6 +982,12 @@ def get_payload(eml):
         eml["payload"]=decode_body(data[hsize:pend], eml["encoding"])
     return eml.get("payload")
 
+# a MIME-fa legnagyobb melysege: az ennel melyebben levo multipart / message reszeket nem bontjuk tovabb (sima
+# levelkent kezeljuk, a tartalmuk nem szoveg, igy az eml2str kihagyja). Valodi levelben 3-4 szintnel melyebb nincs;
+# korlat nelkul egy ~1000 szint melyen egymasba agyazott (rongalt / rosszindulatu) level RecursionError-t, sot a
+# ct_param() except Exception-je miatt 'Cannot recover from stack overflow' fatalis hibat (abort) okozott.
+MAX_MIME_DEPTH=10
+
 def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     if pend<0: pend=len(data)
     
@@ -1034,7 +1040,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
 #     23 MULTI: b'multipart/report'
 #      1 MULTI: b'multipart/digest'
 #      1 MULTI: b'multipart/parallel'
-    if b'boundary' in ct and ctyp.startswith('multipart/'):
+    if level<MAX_MIME_DEPTH and b'boundary' in ct and ctyp.startswith('multipart/'):
         # split data by boundary to parts
         bo=b'--'+ct[b'boundary']
         q=p=hsize # data=data[hsize:]
@@ -1081,7 +1087,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
                 first=False
             elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,pp,p,data[pp:p],data[p:p+10])
 
-    elif ctyp.startswith('message/'):
+    elif level<MAX_MIME_DEPTH and ctyp.startswith('message/'):
         # message/disposition-notification
         # message/rfc822
         pe=parse_eml(data,debug,decode,level+1,p=hsize,pend=pend)
