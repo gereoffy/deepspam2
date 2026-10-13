@@ -6,6 +6,7 @@ import sys
 import time
 import pickle
 import traceback
+import bisect
 
 from difflib import SequenceMatcher
 #from cdifflib import CSequenceMatcher as SequenceMatcher
@@ -565,6 +566,7 @@ while True:
         sel=box_message(["Hide duplicates?","Exact match","Sanitized match","Vocab words only","Vocab words (5:100)","First 100 words","Words 10:100","SequenceMatcher"],y=1)
         if sel<1: continue
         hash_dupes={}
+        by_len=[]   # sel==7: az eddigi egyedi levelek (tokenszam, index, tokenek), tokenszam szerint rendezve
 #        mails_dedup=[-1]*num_mails # kell ez?
         t0=time.time(); n_diffs=0
         for i in range(num_mails):
@@ -581,18 +583,25 @@ while True:
             try:
                 j=hash_dupes[preview]
                 mails_dedup[j]-=1; mails_dedup[i]=j
-            except:
+            except KeyError:
                 if sel==7: # calc diff!
                     j=-1
-                    dups=SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
-                    dups.set_seq2(vocab_split(preview))   # use set_seq2() to set the commonly used sequence once...
-                    for a in hash_dupes:
-                        dups.set_seq1(vocab_split(a)); n_diffs+=1     # ...and call set_seq1() repeatedly, once for each of the other sequences.
-                        if dups.real_quick_ratio()>=0.95 and dups.quick_ratio()>=0.95 and dups.ratio()>=0.95: j=hash_dupes[a]; break # base email index
+                    toks=vocab_split(preview); n=len(toks)   # levelenkent csak egyszer (a tokeneket a by_len tarolja)
+                    # real_quick_ratio = 2*min(la,lb)/(la+lb) >= 0.95 csak hasonlo hosszuaknal teljesulhet:
+                    # a hossz-ablakon (0.9-1.12x, a pontos hatar ~0.905-1.105x) kivulieket meg sem nezzuk
+                    lo=bisect.bisect_left(by_len,(int(n*0.9),)); hi=bisect.bisect_right(by_len,(int(n*1.12)+1,))
+                    cand=sorted(by_len[lo:hi], key=lambda x: x[1])  # erkezesi sorrendben, mint eddig: ugyanaz az elso talalat
+                    if cand:
+                        dups=SequenceMatcher()        # SequenceMatcher computes and caches detailed information about the second sequence
+                        dups.set_seq2(toks)           # use set_seq2() to set the commonly used sequence once...
+                        for la,jj,t in cand:
+                            dups.set_seq1(t); n_diffs+=1  # ...and call set_seq1() repeatedly, once for each of the other sequences.
+                            if dups.real_quick_ratio()>=0.95 and dups.quick_ratio()>=0.95 and dups.ratio()>=0.95: j=jj; break # base email index
                     if j>=0: mails_dedup[j]-=1; mails_dedup[i]=j; continue  # found a match!
+                    bisect.insort(by_len,(n,i,toks))
                 # no match, this is a new uniqe mail!
                 hash_dupes[preview]=i; mails_dedup[i]=-1
-        del hash_dupes
+        del hash_dupes, by_len
         with open(fnev+".dedup","wb") as f: pickle.dump(mails_dedup, f)
 
 
