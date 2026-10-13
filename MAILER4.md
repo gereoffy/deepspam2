@@ -14,6 +14,14 @@ python3 mailer4.py valami.mbox
 - Induláskor a kurzor a **legutolsó** levélen áll.
 - Kilépés: `q`.
 
+## Alapelv: minden a látható levelekre vonatkozik
+
+A szűrők (`D`, `?`, `H`, `A`, `E` – lásd lent) határozzák meg, mely levelek látszanak a listában. **Szándékosan (by design) szinte minden művelet csak a listában éppen látható levelekre hat**, a valamiért rejtettekre nem: mozgás, keresés, csoportos kijelölés (`+` `-` `*`), csoportos törlés (`d`), export (`t`, `[`).
+
+Ebből következik, hogy a csoportos műveletek (`d`, `t`, `[`) **nem a kijelölt, hanem az összes látható** levélre hatnak – ha csak a kijelöltekre akarod, előbb `?`-lel válts „csak kijelöltek” nézetre.
+
+A kivételeket – amelyek a rejtett levelekre is hatnak vagy rájuk is tekintettel vannak – a leírásban ⚠️ jelöli, és a végén össze is vannak gyűjtve: [Kivételek](#kivételek-az-alapelv-alól).
+
 ### Opcionális függőségek (ha hiányoznak, a program csendben nélkülük fut)
 
 | Mi | Honnan tölti | Mire kell |
@@ -53,7 +61,7 @@ Fontos:
 - `[172x37]` – lista mérete
 - `P:` – a levél bájtpozíciója az mbox-ban, `S:` – teljes mérete
 - `D:` – DeepSpam érték (`n/a`, ha nincs modell; üres, ha még nincs kiszámolva; `short`, ha túl rövid a szöveg)
-- `dup:N` – hány példány van ebből a levélből; `!` = ez az eredeti, `(1234)` = ez másolat, az eredeti sorszáma 1234; utána a hasonlósági arány az eredetihez képest
+- `dup:N` – hány példány van ebből a levélből (⚠️ a rejtetteket is beleszámolva); `!` = ez az eredeti, `(1234)` = ez másolat, az eredeti sorszáma 1234; utána a hasonlósági arány az eredetihez képest
 - `preview:` – aktuális preview mód
 - végén: GeoIP (kontinens/ország/szolgáltató) vagy az IP vagy az `X-Grey-ng` első szava
 
@@ -77,14 +85,12 @@ Kiemelések: **inverz** = kurzor, **félkövér** = kijelölt (selected), **halv
 
 | Billentyű | Funkció |
 |---|---|
-| `↑` / `↓` | előző / következő (látható) levél |
+| `↑` / `↓` | előző / következő levél |
 | `PgUp` / `PgDn` | egy képernyőnyit fel / le |
 | `Home` / `End` | első / utolsó levél |
 | `←` / `→` | Feladó és Tárgy oszlop vízszintes görgetése (5 karakterenként) |
-| `l` | ugrás adott sorszámú levélre (beírod a számot) |
+| `l` | ugrás adott sorszámú levélre (beírod a számot) – ⚠️ abszolút sorszám, rejtett levélre is ráugrik |
 | `q` | kilépés (jelölők mentése) |
-
-A mozgás mindig csak a **látható** (szűrőkön átmenő) leveleken lépked.
 
 ### Jelölés egyenként (a kurzor utána a következő levélre lép)
 
@@ -116,7 +122,7 @@ A mozgás mindig csak a **látható** (szűrőkön átmenő) leveleken lépked.
 |  | • `sanitized` / `diff` – URL-ek, e-mail címek, `.hu` domainek kicserélve (`<URL>`, `<EMAIL>`, `<DOMAIN>`); **duplikátumnál színes diff az eredetihez képest**: piros = csak az eredetiben, zöld = csak ebben, fehér = közös |
 |  | • `non-latin` – a nem latin (U+017F feletti) karakterek félkövérek |
 |  | • `tokenizer` – a DeepSpam tokenizált bemenete (csak ha van modell) |
-| `P` | **minden** levél szövegének kinyerése (preview generálás, progress-szel); ≥2000 levélnél elmenti a `.text` fájlba, így legközelebb gyors az indulás és a DeepSpam is rögtön lefut |
+| `P` | ⚠️ **minden** levél (a rejtettek is) szövegének kinyerése (preview generálás, progress-szel); ≥2000 levélnél elmenti a `.text` fájlba, így legközelebb gyors az indulás és a DeepSpam is rögtön lefut |
 | `Enter` | a levél MIME-szerkezete menüben (RAW üzenet, részek, csatolmányok, HTML-ből kinyert szöveg); a kiválasztott rész `/tmp/mailer4.tmp`-be kerül és `mcedit`-ben megnyílik; kilépés után vissza a listába |
 
 ### Keresés
@@ -128,23 +134,21 @@ A mozgás mindig csak a **látható** (szűrőkön átmenő) leveleken lépked.
 | `S` | előző találat (ugyanazzal a feltétellel) |
 | `N` | következő találat |
 
-A keresés is csak a látható leveleken fut.
-
 ### Csoportos kijelölés feltétel alapján
 
-A feltétel szintaxisa ugyanaz, mint a keresésé (lásd lent). **Csak a jelenleg látható levelekre** hat.
+A feltétel szintaxisa ugyanaz, mint a keresésé (lásd lent).
 
 | Billentyű | Funkció |
 |---|---|
 | `+` | a feltételnek megfelelőek kijelölése (hozzáadás). Ha a `?` szűrő „csak kijelöltek” (`S`) állásban van, akkor **szűkít**: a kijelöltek közül csak a feltételnek megfelelők maradnak kijelölve (ÉS kapcsolat) |
 | `-` | a feltételnek megfelelőek kijelölésének levétele |
-| `*` | a feltételnek megfelelők kijelölésének invertálása. Speciális eset: „csak kijelöltek” (`S`) állásban a `*` **minden kijelölést töröl** és visszavált „mind” nézetre |
+| `*` | a feltételnek megfelelők kijelölésének invertálása. Speciális eset: „csak kijelöltek” (`S`) állásban a `*` a látható levelek kijelölését törli és visszavált „mind” nézetre (a más szűrő – pl. `D`, `H` – miatt rejtett kijelöltek kijelölve maradnak) |
 
 Üres feltétel (csak Enter) = minden látható levél illeszkedik, tehát pl. `+` Enter = mind kijelölése, `*` Enter = kijelölés invertálása.
 
-### Csoportos műveletek – a LÁTHATÓ levelekre!
+### Csoportos műveletek
 
-Ezek **nem a kijelölt, hanem az aktuálisan látható** (szűrőkön átmenő) összes levélre hatnak. Tipikus használat: előbb kijelölöd, amit kell, aztán `?`-lel „csak kijelöltek” nézetre váltasz, és úgy adod ki a parancsot.
+Tipikus használat: előbb kijelölöd, amit kell, aztán `?`-lel „csak kijelöltek” nézetre váltasz, és úgy adod ki a parancsot (lásd [Alapelv](#alapelv-minden-a-látható-levelekre-vonatkozik)).
 
 | Billentyű | Funkció |
 |---|---|
@@ -154,7 +158,7 @@ Ezek **nem a kijelölt, hanem az aktuálisan látható** (szűrőkön átmenő) 
 
 ### Duplikátumszűrés
 
-`h` – menüből választható összehasonlítási módszer, utána az összes levelet végignézi (a törlésre jelölteket kihagyja), az eredményt a `.dedup` fájlba menti:
+`h` – menüből választható összehasonlítási módszer, utána végignézi a leveleket, az eredményt a `.dedup` fájlba menti. ⚠️ **Kivétel az alapelv alól:** a szűrőket figyelmen kívül hagyja, csak a törlésre jelölteket hagyja ki, minden mást (rejtett, nem kijelölt, csatolmány nélküli stb. levelet is) vizsgál.
 
 1. **Exact match** – a kinyert szöveg pontosan egyezik
 2. **Sanitized match** – URL/e-mail/domain kicserélve, kisbetűsítve
@@ -162,7 +166,7 @@ Ezek **nem a kijelölt, hanem az aktuálisan látható** (szűrőkön átmenő) 
 4. **Vocab words (5:100)** – szótárszavak közül az 5.–100.
 5. **First 100 words** – az első 100 szó
 6. **Words 10:100** – a 10.–100. szó
-7. **SequenceMatcher** – fuzzy összehasonlítás, ≥95% hasonlóság esetén duplikátum (**nagyon lassú**, minden új levelet minden eddigi egyedivel összevet)
+7. **SequenceMatcher** – fuzzy összehasonlítás, ≥95% hasonlóság (token-szinten) esetén duplikátum. Először a pontos (sanitized) egyezéseket csoportosítja, majd az egyedi levelek között keres közeli másolatot; prefix-szűrés miatt csak a szóba jöhető párokat hasonlítja össze, de az eredmény ugyanaz, mintha mindenkit mindenkivel összevetne. Még így is ez a leglassabb mód.
 
 A 2–7. módok is a sanitized (URL-mentes, kisbetűs) szövegből indulnak ki. Az első előfordulás az „eredeti”, a többi ennek másolata. Utána a `H` szűrővel lehet rejteni/mutatni a másolatokat, a preview `diff` módja pedig megmutatja az eltérést az eredetitől.
 
@@ -213,7 +217,7 @@ Operátorok: `<`, `<=`, `=`, `>=`, `>`
 | `l` | latin betűk száma (≤ U+017F) |
 | `L` | nem latin karakterek száma |
 | `j` | CJK (kínai/japán/koreai) karakterek száma |
-| `h` | duplikáció-szám (lásd megjegyzés lent) |
+| `h` | duplikáció-szám (lásd megjegyzés lent; ⚠️ a rejtett példányokat is számolja) |
 
 Példák:
 
@@ -229,7 +233,7 @@ j>50
 1. `python3 mailer4.py spam.mbox`
 2. `P` – szövegek kinyerése (és DeepSpam értékek), ez a `.text`-be mentődik
 3. `h` → pl. *Sanitized match* – duplikátumok szűrése (a `H` alapból rejti őket)
-4. Szemét kiszórása: pl. `+` → `w<5` (túl rövidek), `+` → `j>20` (CJK), aztán `?` (csak kijelöltek) → átnézés → `d` → `Y`, majd `*` (kijelölések törlése, vissza mind nézetre)
+4. Szemét kiszórása: pl. `+` → `w<5` (túl rövidek), `+` → `j>20` (CJK), aztán `?` (csak kijelöltek) → átnézés → `d` → `Y`, majd `*` (kijelölések törlése, vissza mind nézetre). Megjegyzés: a `d` után a törölt levelek eltűnnek a listából, ezért a `*` rájuk már nem hat, kijelölve maradnak (a `D` szűrővel visszahozva látszik)
 5. Végső válogatás jelöléssel, aztán `?`-lel a megfelelő nézet, és `t` → `SPAM`/`PHIS`/`HAM` export, vagy `[` mbox export
 6. `q` – kilépés, jelölők mentése
 
@@ -238,6 +242,22 @@ j>50
 - **Szövegbeviteli ablak** (keresés, sorszám, fájlnév): `←` `→` `Home` `End` `Del`, `Enter` = OK, `Esc` = mégse. Az első leütött karakter **felülírja** az előző értéket (ha csak módosítani akarod, előbb nyomj egy nyilat).
 - **Menü** (dedup, tag, MIME, hibaüzenet): `↑` `↓` `Home`/`PgUp` `End`/`PgDn`, `Enter` vagy `F3` = választás, `Esc` vagy `q` = mégse.
 - Ha futás közben kivétel történik, a traceback egy menüablakban jelenik meg; `Enter`-rel vissza lehet térni.
+
+## Kivételek az alapelv alól
+
+Ami **nem** csak a látható levelekre hat, vagy a rejtettekre is tekintettel van:
+
+| Mi | Viselkedés |
+|---|---|
+| `h` dedup | minden levelet vizsgál, csak a törlésre jelölteket hagyja ki. A törölt jelölt levelek régi dedup-értéke megmarad (nem nullázódik). |
+| `H` szűrő + más szűrő | mivel a dedup a rejtett levelekre is kiterjed, egy másolat akkor is rejtve marad, ha az eredetije egy másik szűrő miatt nem látszik. Pl. `?` „csak kijelöltek” nézetben egy kijelölt másolat, amelynek az eredetije nincs kijelölve, **egyáltalán nem jelenik meg**; a csoport tehát akár teljesen eltűnhet a listából. Ilyenkor `H`-val kapcsold ki a duplikátum-rejtést. |
+| `P` preview generálás | minden levél szövegét kinyeri (törölteket, rejtetteket is) és menti a `.text`-be |
+| DeepSpam induláskor | a `.text` alapján minden levélre kiszámolja |
+| `dup:N` a fejlécben, `h<op>szám` keresés | a duplikátumcsoport méretébe a rejtett példányok is beleszámítanak; a fejlécben mutatott eredeti sorszáma lehet rejtett levél is |
+| `l` (ugrás sorszámra) | abszolút sorszám, rejtett levélre is ráugrik (a kurzor ilyenkor nem látszik a listában, de a fejléc azt a levelet mutatja; a nyilakkal onnan lehet tovább lépni) |
+| `.flag` mentés | természetesen minden levél jelölőjét menti |
+
+Ami szándék szerint **igen**, csak a láthatókra hat (a teljesség kedvéért): mozgás, keresés (`s` `n` `S` `N`), `+` `-` `*` (a `*` speciális esete is!), `d`, `t`, `[`. Az egyenkénti jelölés (`Ins`, `Del`, `e`) és az `Enter` a kurzor alatti levélre hat.
 
 ## Ismert furcsaságok (a kód alapján)
 
