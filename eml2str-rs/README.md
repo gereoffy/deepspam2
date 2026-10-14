@@ -15,6 +15,12 @@ részek jelentenek, lásd az ismert eltéréseknél.
   ezek mind CJK kódlapú részt tartalmaznak, egyetlen kivétel az ismert utf-7 surrogate-eset.
 - **Kimerítő tesztek** a `html2text` trükkös részeire (tagvég, comment, `style`, `opacity`): több százezer generált
   HTML-darabon azonos.
+- **Átnézés 2026-10-13/14** (kódolvasás + újabb differenciális tesztek): 1456 kézzel írt éleset (base64/QP padding,
+  `opacity`, meta charset, NUL a charset-névben, BOM-ok, 27 charset × 14 bájtsor, ICS, multipart-trükkök, hibás
+  fejlécek, véletlen szemét), 80 000 fuzz-levél két új seeddel és 30 000 tisztán véletlen "levél": a Rust nem
+  panic-el, a Python-modul 8 szálon is az egyszálúval azonos kimenetet ad, az eltérések mind a CJK-kategóriába esnek
+  (beleértve az RTF `\ansicpg936` és a Subject gb2312/gbk encoded-word eseteit). Ekkor került be a 10 szintes
+  MIME-mélységlimit, a johab fallback (`flush_hex`) és a Pythonból generált Unicode-számjegy tábla (lásd lent).
 - **Sebesség** ezen a gépen (egy szálon, a Python oldalon is a mostani, optimalizált `eml2str.py`-vel):
 
   | | valódi levelek (6,8 GB) | Junk-all (1 GB) |
@@ -122,8 +128,10 @@ Nem portolt, mert az `eml2str()` nem használja: `get_mimedata`, `readfolder`, `
 
 A charset-kezelés a Python `codecs` viselkedését követi. Ezt a fordításkor generált `tables.rs` biztosítja:
 codec-névfeloldás (`codecs.lookup` + az `eml2str` saját aliasai és felülírásai), a Python egybájtos kódtáblái,
-HTML5-entitások, `invalid_charrefs`. A utf-7 dekóder a CPython C-kódját követi, a CJK kódlapokat az encoding_rs
-dekódolja.
+HTML5-entitások, `invalid_charrefs`, és a Unicode decimális számjegy-blokkok (`ND_ZEROS`, a `unicodedata`-ból): az RTF
+`\uN`, `\ucN`, `\binN`, `\fN`, `\fcharsetN` argumentumában a Python `re` `\d`-je és az `int()` minden Nd számjegyet
+elfogad, a Rust ugyanezt a táblát használja. A utf-7 dekóder a CPython C-kódját követi, a CJK kódlapokat az
+encoding_rs dekódolja.
 
 ## Fájlok
 
@@ -132,11 +140,11 @@ dekódolja.
 | `src/lib.rs` | `eml2str()`, `decode_payload()`, `hdrdecode4()`, `parse_ics()`, `remove_spamtag()` |
 | `src/mime.rs` | `parse_eml()`, `parse_ctyp()`, `decode_body()`, a `binascii` `a2b_base64` / `a2b_qp` pontos megfelelője |
 | `src/html.rs` | `html2text()`, `html.unescape()` (Python stdlib), `parse_htmlhead()`, `html_extract_attr()` |
-| `src/rtf.rs` | `parse_rtfhead()`, a tartalék RTF-kinyerő, `fix_surrogates()` |
+| `src/rtf.rs` | `parse_rtfhead()`, a tartalék RTF-kinyerő (a legkülső `}` után vége, tartományon kívüli `\uN` → U+FFFD, johab fallback), `fix_surrogates()` |
 | `src/codec.rs` | `codecs.lookup`, `safe_decode()`, `ascii_compatible()`, a `mixed` hibakezelők, UTF-8/16/32, egybájtos kódlapok |
 | `src/utf7.rs` | utf-7 dekóder |
 | `src/python.rs` | a Python-modul (`eml2str_rs`, a `python` feature-rel) |
-| `build.rs`, `gen_tables.py` | a codec-táblák generálása fordításkor |
+| `build.rs`, `gen_tables.py` | a codec-, entitás- és Unicode-számjegy táblák generálása fordításkor |
 | `build_python.sh` | a Python-modul fordítása és bemásolása |
 | `src/main.rs` | `eml2str-bench` CLI |
 | `examples/prof.rs` | fázisonkénti időmérés (`cargo run --release --example prof -- ../Junk.mbox`) |
