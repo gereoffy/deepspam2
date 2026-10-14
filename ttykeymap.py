@@ -4,10 +4,13 @@ import fcntl
 import termios
 from os import get_terminal_size
 
-class NonBlockingInput(object):
+class NonBufferedInput(object):  # (korabban NonBlockingInput, de az olvasas nem az)
+    # Az olvasas blokkolo marad (VMIN=1), csak a kanonikus (soronkenti) mod es az echo kapcsolodik ki,
+    # igy a read() az elso byte-ra visszater azzal, ami epp megerkezett. A mailer3 C-s getch2()-je select()-tel, timeouttal
+    # varakozott (es kozben az uj leveleket nezte), ez a Python valtozatban nem kell: a mailboxok nem valtoznak.
 
     def __enter__(self):
-        # canonical mode, no echo
+        # non-canonical mode, no echo
         self.old = termios.tcgetattr(sys.stdin)
         new = termios.tcgetattr(sys.stdin)
         new[3] = new[3] & ~(termios.ICANON | termios.ECHO)
@@ -18,7 +21,6 @@ class NonBlockingInput(object):
 #        fcntl.fcntl(sys.stdin, fcntl.F_SETFL, self.orig_fl | os.O_NONBLOCK)
 
     def __exit__(self, *args):
-        print("restore terminal to previous state")
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old)
 #        fcntl.fcntl(sys.stdin, fcntl.F_SETFL, self.orig_fl)
 
@@ -47,22 +49,43 @@ keymap={
     b'\x1bOC': "right",
     b'\x1bOD': "left",
 
-    b'\x1bO2A': "s+up",
+    b'\x1bO2A': "s+up",   # regi iTerm2 / rxvt
     b'\x1bO2B': "s+down",
     b'\x1bO2C': "s+right",
     b'\x1bO2D': "s+left",
-    
+    b'\x1b[1;2A': "s+up",  # xterm / iTerm2 / linux konzol: modositok: 2=shift 3=alt 5=ctrl 9=meta (iTerm2 alt)
+    b'\x1b[1;2B': "s+down",
+    b'\x1b[1;2C': "s+right",
+    b'\x1b[1;2D': "s+left",
+    b'\x1b[1;5A': "c+up",
+    b'\x1b[1;5B': "c+down",
+    b'\x1b[1;5C': "c+right",
+    b'\x1b[1;5D': "c+left",
+    b'\x1b[1;3A': "a+up",
+    b'\x1b[1;3B': "a+down",
+    b'\x1b[1;3C': "a+right",
+    b'\x1b[1;3D': "a+left",
     b'\x1b[1;9A': "a+up",
     b'\x1b[1;9B': "a+down",
     b'\x1b[1;9C': "a+right",
     b'\x1b[1;9D': "a+left",
 
-    b'\x1b[1~': "home",
+    b'\x1b[1~': "home",   # linux konzol, rxvt, atallitott iTerm2
     b'\x1b[2~': "ins",
     b'\x1b[3~': "del",
     b'\x1b[4~': "end",
     b'\x1b[5~': "pgup",
     b'\x1b[6~': "pgdn",
+    b'\x1b[H': "home",    # xterm / gyari iTerm2 (normal es application keypad mod)
+    b'\x1b[F': "end",
+    b'\x1bOH': "home",
+    b'\x1bOF': "end",
+    b'\x1b[1;2H': "s+home",
+    b'\x1b[1;2F': "s+end",
+    b'\x1b[1;5H': "c+home",
+    b'\x1b[1;5F': "c+end",
+    b'\x1b[5;3~': "a+pgup",
+    b'\x1b[6;3~': "a+pgdn",
 
     b'\x1b[7$': "s+home",
     b'\x1b[8$': "s+end",
@@ -88,6 +111,12 @@ keymap={
     b'\x1bOR': "f3",
     b'\x1bOS': "f4",
     
+    b'\x1b[[A': "f1",  # linux konzol F1-F5
+    b'\x1b[[B': "f2",
+    b'\x1b[[C': "f3",
+    b'\x1b[[D': "f4",
+    b'\x1b[[E': "f5",
+
     b'\x1b[11~': "f1",
     b'\x1b[12~': "f2",
     b'\x1b[13~': "f3",
@@ -98,17 +127,30 @@ keymap={
     b'\x1b[19~': "f8",
     b'\x1b[20~': "f9",
     b'\x1b[21~': "f10",
+    b'\x1b[23~': "f11",  # xterm / iTerm2 / linux konzol (rxvt-ben s+f1, s+f2 volt)
+    b'\x1b[24~': "f12",
 
-    b'\x1b[23~': "s+f1",
-    b'\x1b[24~': "s+f2",
-    b'\x1b[25~': "s+f3",
-    b'\x1b[26~': "s+f4",
-    b'\x1b[28~': "s+f5",
-    b'\x1b[29~': "s+f6",
-    b'\x1b[31~': "s+f7",
-    b'\x1b[32~': "s+f8",
-    b'\x1b[33~': "s+f9",
-    b'\x1b[34~': "s+f10",
+    b'\x1b[1;2P': "s+f1",  # xterm / iTerm2 shift+F
+    b'\x1b[1;2Q': "s+f2",
+    b'\x1b[1;2R': "s+f3",
+    b'\x1b[1;2S': "s+f4",
+    b'\x1b[15;2~': "s+f5",
+    b'\x1b[17;2~': "s+f6",
+    b'\x1b[18;2~': "s+f7",
+    b'\x1b[19;2~': "s+f8",
+    b'\x1b[20;2~': "s+f9",
+    b'\x1b[21;2~': "s+f10",
+    b'\x1b[23;2~': "s+f11",
+    b'\x1b[24;2~': "s+f12",
+
+    b'\x1b[25~': "s+f1",  # linux konzol shift+F1-F8 (rxvt-ben s+f3-tol s+f10-ig, maskepp szamozva)
+    b'\x1b[26~': "s+f2",
+    b'\x1b[28~': "s+f3",
+    b'\x1b[29~': "s+f4",
+    b'\x1b[31~': "s+f5",
+    b'\x1b[32~': "s+f6",
+    b'\x1b[33~': "s+f7",
+    b'\x1b[34~': "s+f8",
 
     b'\x1b1': "f1", # ALT+1
     b'\x1b2': "f2", # ALT+2
@@ -122,6 +164,8 @@ keymap={
     b'\x1b0': "f10",# ALT+0
 
 }
+
+keymap_bylen=sorted(keymap,key=len,reverse=True)
 
 # INIT:
 #sys.stdin = sys.stdin.detach()
@@ -148,12 +192,11 @@ def getch2():
 
     if ch[0] in [27,8,9,10,127]: # ESC & control keys
         if ch in keymap: return keymap[ch]  #  egyszeru eset :)
-        for k in keymap:
+        for k in keymap_bylen: # a leghosszabb illeszkedo kod (pl. \x1b\x1b[5~ elobb, mint \x1b\x1b)
             if ch.startswith(k):
                 chbuffer=ch[len(k):]+chbuffer
                 return keymap[k]
-        # unknown ESC code
-        print(ch)
+        # unknown ESC code (nem irjuk ki: szetcsuszna a kepernyo)
         #chbuffer=ch[1:]+chbuffer
         #if ch==b'\x1b':
         return "esc"
@@ -163,10 +206,7 @@ def getch2():
     if l<=1: # ascii/control
         chbuffer=ch[1:]+chbuffer
         return chr(ch[0])
-#    if len(ch)<l:
-#        print("[not enough bytes]")
-#        chbuffer=ch+chbuffer
-#        return ""
+    while len(ch)<l: ch+=sys.stdin.read(256) # felbevagott utf-8 karakter: a tobbi byte-ja uton van, megvarjuk
     chbuffer=ch[l:]+chbuffer
     return ch[:l].decode("utf-8",errors="backslashreplace")
 
@@ -283,7 +323,7 @@ if __name__ == "__main__":
 
 #  box_message("The Block Elements Unicode block includes shading characters. 32 characters are included in the block.","laxy foxzy")
 
-  with NonBlockingInput():
+  with NonBufferedInput():
 
 #    draw_box(30,10,50,6)
 #    tty_input(35,12,40,sor="Hello")

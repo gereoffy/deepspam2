@@ -15,7 +15,7 @@ from difflib import SequenceMatcher
 #from hdrdecode import parse_from
 from eml2str import eml2str,get_mimedata,vocab_split,remove_url,remove_spamtag,readfolder,hdrdecode4,decode_from
 from widechars import wcfixstr,ucsremove,is_cjk
-from ttykeymap import NonBlockingInput,getch2,clrscr,box_message,box_input
+from ttykeymap import NonBufferedInput,getch2,clrscr,box_message,box_input
 
 try:  from eml2str_rs import eml2str  # a gyors Rust valtozat, ha le van forditva (ugyanaz a kimenet)
 except ImportError: pass              # marad a Python eml2str
@@ -437,7 +437,7 @@ def drawall():
 while True:
  clrscr()
  last_y0=-2 # force full redraw!
- with NonBlockingInput():
+ with NonBufferedInput():
   try:
    while True:
     drawall()
@@ -662,7 +662,7 @@ while True:
            '_warn':   b'\x1b[93m',  # vilagos sarga
            '_reset':  b'\x1b[0m'}
         mimeinfo,mimedata=get_mimedata(mboxf.read(mails_meta[yy]["_size"]),colors=C)
-        sel=box_message(mimeinfo,y=0)
+        sel=box_message([wcfixstr(s) for s in mimeinfo],y=0) # fajlnevekben lehet szeles (CJK) / vezerlo karakter
         if sel<0: continue
         viewdata=mimedata[sel]
         break
