@@ -112,5 +112,10 @@ for k in sorted(eml2str.invalid_charrefs): o.write('    (%d, %s),\n' % (k, rs(em
 o.write('];\n\npub static CHARSET_OVERRIDES: &[(&str, &str)] = &[\n')
 for k in sorted(eml2str.charset_overrides): o.write('    (%s, %s),\n' % (rs(k), rs(eml2str.charset_overrides[k])))
 o.write('];\n')
+# a Unicode decimalis szamjegy-blokkok (Nd, 10-es futamok) kezdo kodpontjai: a Python re '\\d' es int() ezeket fogadja el
+import unicodedata
+nd = [c for c in range(0x110000) if unicodedata.category(chr(c)) == 'Nd' and unicodedata.decimal(chr(c)) == 0]
+assert all(unicodedata.decimal(chr(z + i)) == i for z in nd for i in range(10))
+o.write('\n/// Unicode %s Nd blokkok kezdete (a 0 szamjegy kodpontja), rendezve\npub static ND_ZEROS: &[u32] = &[%s];\n' % (unicodedata.unidata_version, ','.join('0x%x' % z for z in nd)))
 print('codecs: %d  charmaps: %d  aliases: %d  modules: %d  custom: %d' % (len(codec_list), len(charmaps), len(aliases), len(modules), len(custom)), file=sys.stderr)
 print([c for c in codec_list if c[1] == 'Unsupported'], file=sys.stderr)

@@ -89,13 +89,13 @@ fn py_int(s: &str) -> Option<i64> {
     Some(if neg { -v } else { v })
 }
 
-/// nem-ASCII unicode decimalis szamjegyek erteke (a Unicode Nd blokkok 10-es csoportokban vannak)
+/// nem-ASCII unicode decimalis szamjegyek erteke (Nd, 10-es futamok; a tablat a gen_tables.py a fordito Python
+/// unicodedata-jabol generalja, igy a Python re `\d` / int() szamjegykeszletevel azonos)
 fn unicode_digit(c: char) -> Option<u32> {
-    const ZEROS: &[u32] = &[0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66, 0xde6,
-        0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40,
-        0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10];
     let u = c as u32;
-    ZEROS.iter().find(|&&z| u >= z && u < z + 10).map(|&z| u - z)
+    let z = &crate::tables::ND_ZEROS;
+    let i = z.partition_point(|&s| s <= u);
+    (i > 0 && u < z[i - 1] + 10).then(|| u - z[i - 1])
 }
 
 fn re_fonttbl() -> &'static Regex {
