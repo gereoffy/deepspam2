@@ -515,20 +515,34 @@ def opacity_hidden(tag):  # csak akkor hivjuk, ha b'opacity:' in tag
     v=float(v)
     return (v/100 if pct else v)<0.5
 
-def html2text(data,debug=False):
+def html2text(data,debug=False,colors=None):
   warning=''
   indent=0
   urls=[]
-  
+
+  if debug:
+    # colors: a debug kimenet reszeinek jelolese a megjelenito sajat kodjaival (pl. ANSI escape), a tiszta szovegkinyerest
+    # (debug=False) nem erinti. Kulcsok: barmelyik tagnev ('script', 'style', 'img'...: annak a nyito / zaro tagje, es a
+    # kihagyott blokkoknal - script, style, title, svg, annotation - a blokk tartalma is), es a sajat, '_' kezdetu kulcsok:
+    # '_comment' (<!-- -->), '_tag' (a nem nevesitett tagok), '_text' (a tagok kozti szoveg), '_warn' (a <!> | sorok),
+    # '_reset' (minden jelolt darab utan es a kimenet elejen). Hianyzo kulcs: az a resz jeloletlen marad.
+    colors=colors or {}
+    reset=colors.get('_reset',b'')
+    def _c(kind,b):
+      col=colors.get(kind)
+      # tobbsoros darabnal (style / script blokk) minden sor kulon kapja a kodot: a less -R a sor vegen torli a szint
+      return col+b.replace(b'\n',reset+b'\n'+col)+reset if col and b else b
+
   p=data.find(b'<')
   if p<0: # not html!?
-      return (data,[data]) if debug else data
+      return (data,[_c('_text',data)]) if debug else data
   text=[data[:p]] if p>0 else []  # initial text before 1st tag
   tlen=0 #len(data[:p].strip())
 
   if debug:
-      html=[] if data[p:p+9]==b'<!DOCTYPE' else [b'<!DOCTYPE HTML>\n']
-      html+=[data[:p]]
+      if colors: html=[reset]
+      else: html=[] if data[p:p+9]==b'<!DOCTYPE' else [b'<!DOCTYPE HTML>\n']
+      html+=[_c('_text',data[:p])]
 
   while p<len(data):  #for ret in data.split(b'<'):
 
@@ -590,7 +604,8 @@ def html2text(data,debug=False):
 
     if debug:
       if tt<0: indent-=1
-      html+=[b'%5d|'%(p)+b' '*max(0,min(64,indent)) + data[p:q].replace(b'\n',b' ')]
+      kind='_comment' if data[p:p+4]==b'<!--' else ttag if ttag in colors else '_tag'  # a colors-ban nevesitett tag (script, style, img...) sajat szint kap
+      html+=[b'%5d|'%(p)+b' '*max(0,min(64,indent)) + _c(kind,data[p:q].replace(b'\n',b' '))]
       if tt>0: indent+=1
 
     # FIND next tag:
@@ -618,8 +633,8 @@ def html2text(data,debug=False):
       p=data.find(b'<',p+1) # skip this < and find next one
 
     if debug:
-      html+=[data[q:p].rstrip()+b'\n']
-      if warning: html+=[b' <!> |' + warning.encode("utf-8",errors="ignore")]  # beirjuk a sorok koze inkabb!
+      html+=[_c(ttag if in_block and ttag in colors else '_text',data[q:p].rstrip())+b'\n']
+      if warning: html+=[_c('_warn',b' <!> |' + warning.encode("utf-8",errors="ignore"))]  # beirjuk a sorok koze inkabb!
       warning=""
 
     if in_block:
@@ -649,7 +664,7 @@ def html2text(data,debug=False):
     text+=[txt]
     tlen+=len(txt.strip())
 
-  if debug and warning: html+=[b' <!> |' + warning.encode("utf-8",errors="ignore")]  # beirjuk a sorok koze inkabb!
+  if debug and warning: html+=[_c('_warn',b' <!> |' + warning.encode("utf-8",errors="ignore"))]  # beirjuk a sorok koze inkabb!
 
   text=b''.join(text)
   text=b' '.join(text.split())  # remove redundant spaces
@@ -816,7 +831,7 @@ def eml2str(msg,ds2=False):
   return (subject,text) if subject else text
 
 
-def get_mimedata(eml):
+def get_mimedata(eml,colors=None):
     mimeinfo=["RAW message: %d bytes"%(len(eml))]
     mimedata=[eml]
     msg=parse_eml(eml,decode=True)
@@ -839,7 +854,7 @@ def get_mimedata(eml):
                 html=decode_payload(pay,ctyp,cset) # ez meg a prettify elott kell, mert az elbassza a whitespacet...
                 if ctyp=="text/html" or ctyp=="text/xml":
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
-                    dtext,dhtml=html2text(pay,debug=True)  # html prettify :)
+                    dtext,dhtml=html2text(pay,debug=True,colors=colors)  # html prettify :)
                     pay=b''.join(dhtml)
         mimeinfo.append(s)
 
