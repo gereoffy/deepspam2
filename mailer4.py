@@ -6,6 +6,7 @@ import sys
 import time
 import pickle
 import traceback
+import subprocess
 import collections
 
 from difflib import SequenceMatcher
@@ -638,13 +639,32 @@ while True:
         if n_empty: summary+=[line("empty (no text):",n_empty)]
         box_message(summary,y=0)
 
-
+    viewdata=None
     if ch=='enter':
         mboxf.seek(mails_meta[yy]["_fpos"])
-        mimeinfo,mimedata=get_mimedata(mboxf.read(mails_meta[yy]["_size"]))
+        # a html2text debug kimenet szinei (less -R): standard 16 szinu keszlet, fekete hatterre; 90-97 = vilagos szinek
+        #Szín	alap	világos
+        #szürke	30	90
+        #piros	31	91
+        #zöld	32	92
+        #sárga	33	93
+        #kék	34	94
+        #lila	35	95
+        #cián	36	96
+        #fehér	37	97
+        C={'_comment':b'\x1b[90m',  # sotetszurke (halvany, nem szamit)
+           'script':  b'\x1b[91m',  # vilagos piros
+           'a':       b'\x1b[91m',  # vilagos piros
+           'style':   b'\x1b[35m',  # lila (halvany, nem szamit)
+           '_tag':    b'\x1b[96m',  # vilagos cian
+           '_text':   b'\x1b[1;97m',# bold + vilagos feher (a sima 97 sok terminalon vilagosszurke): a szoveg a leghangsulyosabb
+           '_hidden': b'\x1b[1;92m',# bold + vilagos kek ?
+           '_warn':   b'\x1b[93m',  # vilagos sarga
+           '_reset':  b'\x1b[0m'}
+        mimeinfo,mimedata=get_mimedata(mboxf.read(mails_meta[yy]["_size"]),colors=C)
         sel=box_message(mimeinfo,y=0)
         if sel<0: continue
-        with open("/tmp/mailer4.tmp","wb") as f: f.write(mimedata[sel])
+        viewdata=mimedata[sel]
         break
 
   except:
@@ -656,8 +676,12 @@ while True:
  if sum(x!=0 for x in mails_flag):
     with open(fnev+".flag","wb") as f: pickle.dump(mails_flag, f)
  if ch=="q": break # quit
- if ch=="enter":
+ if ch=="enter" and viewdata is not None:  # (kivetel eseten nincs mit mutatni)
     # start viewer!
-    os.system("mcedit --nosubshell /tmp/mailer4.tmp")
+#    os.system("mcedit --nosubshell /tmp/mailer4.tmp")
 #    os.system("mcview --nosubshell /tmp/mailer4.tmp")
+    # TERM=screen-256color: az Apple-fele less a Home/End kodjat a terminfo-bol veszi (khome/kend), es a lesskey fajlokat
+    # figyelmen kivul hagyja; a screen terminfo-jaban a Home/End pont az iTerm2-ben beallitott \e[1~ / \e[4~
+    # a tartalmat pipe-on kapja (nem kell tmp fajl); a billentyuzetet a less a /dev/tty-rol olvassa
+    subprocess.run(["less","-R","--shift","16"],input=viewdata,env={**os.environ,"TERM":"screen-256color"})
 
