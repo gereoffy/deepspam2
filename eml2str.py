@@ -529,8 +529,9 @@ def html2text(data,debug=False,colors=None):
     # colors: a debug kimenet reszeinek jelolese a megjelenito sajat kodjaival (pl. ANSI escape), a tiszta szovegkinyerest
     # (debug=False) nem erinti. Kulcsok: barmelyik tagnev ('script', 'style', 'img'...: annak a nyito / zaro tagje, es a
     # kihagyott blokkoknal - script, style, title, svg, annotation - a blokk tartalma is), es a sajat, '_' kezdetu kulcsok:
-    # '_comment' (<!-- -->), '_tag' (a nem nevesitett tagok), '_text' (a tagok kozti szoveg), '_warn' (a <!> | sorok),
-    # '_reset' (minden jelolt darab utan es a kimenet elejen). Hianyzo kulcs: az a resz jeloletlen marad.
+    # '_comment' (<!-- -->), '_tag' (a nem nevesitett tagok), '_text' (a tagok kozti szoveg), '_hidden' (a rejtettkent
+    # kihagyott szoveg), '_warn' (a <!> | sorok), '_reset' (minden jelolt darab utan es a kimenet elejen). Hianyzo kulcs:
+    # az a resz jeloletlen marad.
     colors=colors or {}
     reset=colors.get('_reset',b'')
     def _c(kind,b):

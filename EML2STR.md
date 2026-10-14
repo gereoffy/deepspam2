@@ -96,7 +96,7 @@ Az első pár: `"RAW message: N bytes"` ↔ a teljes nyers levél. Utána MIME r
 | | `disposition: fájlnév` sor | a dekódolt payload (vagy a nyers rész) |
 | ha van kinyert szöveg, és eltér a payloadtól | `Extracted text: <karakter>/<bájt>` | a kinyert szöveg UTF-8 bájtokként |
 
-HTML / XML résznél a payload blokk a `html2text(debug=True)` által "prettify"-olt, annotált HTML, a `colors` szerint jelölve.
+HTML / XML résznél a payload blokk a `html2text(debug=True)` által "prettify"-olt, annotált HTML, a `colors` szerint jelölve, és a rész charsetje szerint UTF-8-ra átkódolva (`safe_decode`), hogy a néző ékezetesen mutassa; a sorok elején álló pozíciók a nyers bájtokra vonatkoznak.
 
 ### `parse_eml(data, debug=False, decode=False, level=0, p=0, pend=-1)`
 Saját, rekurzív MIME parser. A `data`-t nem másolja, csak pozíciókkal (`p`, `pend`) dolgozik.
@@ -223,8 +223,8 @@ Saját, gyors, toleráns HTML → szöveg konverter (bájt szinten dolgozik, a k
 | Paraméter | Típus | Leírás |
 |---|---|---|
 | `data` | `bytes` | HTML forrás. |
-| `debug` | `bool` | Ha `True`, egy tagenként tördelt, behúzott, pozíciókkal és warningokkal annotált HTML listát is visszaad. |
-| `colors` | `dict[str, bytes]` | Csak `debug=True` esetén: a debug HTML részeinek jelölése a megjelenítő saját kódjaival (pl. ANSI escape a `less -R`-hez). Kulcsok: bármelyik tagnév (`script`, `style`, `img`, …: annak a nyitó/záró tagje, a kihagyott blokkoknál – `script`, `style`, `title`, `svg`, `annotation` – a tartalma is), és a saját, `_` kezdetű kulcsok: `_comment` (`<!-- -->`), `_tag` (a nem nevesített tagok), `_text` (a tagok közti szöveg), `_warn` (a `<!> \|` sorok), `_reset` (minden jelölt darab után, és `colors` megadásakor a kimenet elején is). Hiányzó kulcs: az a rész jelöletlen marad. A szöveg egyszínű, a rejtett/preview részek nincsenek külön jelölve. A `debug=False` utat nem érinti. |
+| `debug` | `bool` | Ha `True`, egy tagenként tördelt, behúzott, pozíciókkal és warningokkal annotált HTML listát is visszaad. A 64 karakternél hosszabb beágyazott base64 adatot (`data:…;base64,…` URI-k, pl. képek) `base64,{N bytes base64 data}` alakra rövidíti (`DEBUG_B64_RE`); a kinyert szöveget ez nem érinti. |
+| `colors` | `dict[str, bytes]` | Csak `debug=True` esetén: a debug HTML részeinek jelölése a megjelenítő saját kódjaival (pl. ANSI escape a `less -R`-hez). Kulcsok: bármelyik tagnév (`script`, `style`, `img`, …: annak a nyitó/záró tagje, a kihagyott blokkoknál – `script`, `style`, `title`, `svg`, `annotation` – a tartalma is), és a saját, `_` kezdetű kulcsok: `_comment` (`<!-- -->`), `_tag` (a nem nevesített tagok), `_text` (a tagok közti, a kinyert szövegbe kerülő szöveg), `_hidden` (a rejtettnek ítélt, a szövegből kimaradó rész: `display:none`, `font-size:0/1px`, `max-height:0`, `mso-hide:all`, `opacity` < 0.5; a preview-header és a `signedadaptivecard` adat is), `_warn` (a `<!> \|` sorok), `_reset` (minden jelölt darab után, és `colors` megadásakor a kimenet elején is). Hiányzó kulcs: az a rész jelöletlen marad. A `debug=False` utat nem érinti. |
 
 **Visszatérés:**
 - `debug=False`: `bytes` – a szöveg.
