@@ -69,7 +69,7 @@ A modul fő belépési pontja: nyers e-mailből kinyeri a "legjobb" szöveges t�
 > Ha `ds2=True`, de nincs (vagy üres) Subject, akkor is csak `str` jön vissza – ez szándékos,
 > a deepspam2 így várja.
 
-Működés: `parse_eml(decode='lazy')`-val MIME-fát épít, bejárja a leveleket (leaf part-okat), és a
+Működés: `parse_eml(decode='lazy')`-val MIME-fát épít (legfeljebb `MAX_MIME_DEPTH` = 10 szint mélyen), bejárja a leveleket (leaf part-okat), és a
 nem-csatolmány `text/*`, `application/ics`, TNEF és RTF részeket `get_payload()`-dal (transfer-decoding) és
 `decode_payload()`-dal dekódolja. A többi rész (képek, zip, egyéb csatolmányok) base64 / QP dekódolása így el sem
 készül, ami csatolmány-nehéz leveleknél jelentős gyorsulás; az eredmény ugyanaz, mint `decode=True`-val.
@@ -77,12 +77,13 @@ Heurisztika a választáshoz: a HTML / TNEF rész előnyt élvez (>20 karakter),
 felülírja az eddigit, ha legalább fele olyan hosszú, és a SpamAssassin riport ("Spam detection
 software,…") mindig felülíródik. Ha találunk 200 karakternél hosszabb HTML/TNEF szöveget, leáll.
 
-### `get_mimedata(eml)`
+### `get_mimedata(eml, colors=None)`
 Debug / megjelenítő célú MIME-fa kibontás (pl. GUI-s levélnézőhöz).
 
 | Paraméter | Típus | Leírás |
 |---|---|---|
 | `eml` | `bytes` | Nyers üzenet. |
+| `colors` | `dict[str, bytes]` | A `html2text(debug=True, colors=...)`-nek továbbadott jelölőkódok (lásd ott). |
 
 **Visszatérés:** `tuple[list[str], list[bytes]]` = `(mimeinfo, mimedata)`
 A két lista mindig egyforma hosszú, és index szerint összetartozik (`mimeinfo[i]` ↔ `mimedata[i]`).
@@ -95,7 +96,7 @@ Az első pár: `"RAW message: N bytes"` ↔ a teljes nyers levél. Utána MIME r
 | | `disposition: fájlnév` sor | a dekódolt payload (vagy a nyers rész) |
 | ha van kinyert szöveg, és eltér a payloadtól | `Extracted text: <karakter>/<bájt>` | a kinyert szöveg UTF-8 bájtokként |
 
-HTML / XML résznél a payload blokk a `html2text(debug=True)` által "prettify"-olt, annotált HTML.
+HTML / XML résznél a payload blokk a `html2text(debug=True)` által "prettify"-olt, annotált HTML, a `colors` szerint jelölve.
 
 ### `parse_eml(data, debug=False, decode=False, level=0, p=0, pend=-1)`
 Saját, rekurzív MIME parser. A `data`-t nem másolja, csak pozíciókkal (`p`, `pend`) dolgozik.
@@ -216,13 +217,14 @@ Content-Transfer-Encoding dekódolás.
 **Visszatérés:** `bytes` – dekódolt adat; hiba vagy ismeretlen kódolás esetén az eredeti `data`
 (és egy `print()` üzenet).
 
-### `html2text(data, debug=False)`
+### `html2text(data, debug=False, colors=None)`
 Saját, gyors, toleráns HTML → szöveg konverter (bájt szinten dolgozik, a karakterkódolás ekkor még nincs feloldva).
 
 | Paraméter | Típus | Leírás |
 |---|---|---|
 | `data` | `bytes` | HTML forrás. |
 | `debug` | `bool` | Ha `True`, egy tagenként tördelt, behúzott, pozíciókkal és warningokkal annotált HTML listát is visszaad. |
+| `colors` | `dict[str, bytes]` | Csak `debug=True` esetén: a debug HTML részeinek jelölése a megjelenítő saját kódjaival (pl. ANSI escape a `less -R`-hez). Kulcsok: bármelyik tagnév (`script`, `style`, `img`, …: annak a nyitó/záró tagje, a kihagyott blokkoknál – `script`, `style`, `title`, `svg`, `annotation` – a tartalma is), és a saját, `_` kezdetű kulcsok: `_comment` (`<!-- -->`), `_tag` (a nem nevesített tagok), `_text` (a tagok közti szöveg), `_warn` (a `<!> \|` sorok), `_reset` (minden jelölt darab után, és `colors` megadásakor a kimenet elején is). Hiányzó kulcs: az a rész jelöletlen marad. A szöveg egyszínű, a rejtett/preview részek nincsenek külön jelölve. A `debug=False` utat nem érinti. |
 
 **Visszatérés:**
 - `debug=False`: `bytes` – a szöveg.
