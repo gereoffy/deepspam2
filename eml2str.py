@@ -506,6 +506,11 @@ TAG_END_RE=re.compile(rb'''
 
 OPACITY_RE=re.compile(rb'opacity:([0-9]*\.?[0-9]+)(%?)')
 
+# a html2text debug kimeneteben a hosszu (>= 64 karakter) beagyazott base64 adat (data: URI-k: kepek, fontok) roviditese
+DEBUG_B64_RE=re.compile(rb'base64,[A-Za-z0-9+/=]{64,}')
+def _debug_shorten(b):
+    return DEBUG_B64_RE.sub(lambda m: b'base64,{%d bytes base64 data}'%(len(m.group())-7), b) if len(b)>=71 else b
+
 # halvany (opacity < 0.5) szoveg: a spammerek ezzel rejtik el a szurok megtevesztesere betett szoveget. A 0.5 es
 # feletti erteket nem vesszuk rejtettnek: az alig halvanyabb (pl. 0.9) szoveg lathato, es eppen a spam fo szovege szokott lenni.
 def opacity_hidden(tag):  # csak akkor hivjuk, ha b'opacity:' in tag
@@ -605,7 +610,7 @@ def html2text(data,debug=False,colors=None):
     if debug:
       if tt<0: indent-=1
       kind='_comment' if data[p:p+4]==b'<!--' else ttag if ttag in colors else '_tag'  # a colors-ban nevesitett tag (script, style, img...) sajat szint kap
-      html+=[b'%5d|'%(p)+b' '*max(0,min(64,indent)) + _c(kind,data[p:q].replace(b'\n',b' '))]
+      html+=[b'%5d|'%(p)+b' '*max(0,min(64,indent)) + _c(kind,_debug_shorten(data[p:q].replace(b'\n',b' ')))]
       if tt>0: indent+=1
 
     # FIND next tag:
@@ -632,8 +637,13 @@ def html2text(data,debug=False,colors=None):
         warning+="WARN! skip <%c at %d\n"%(c,p)  # hibas tag formatum!
       p=data.find(b'<',p+1) # skip this < and find next one
 
+    hidden=False  # detect hidden text!
+    if b'style' in tag: # detect hidden text!
+        tag=tag.translate(None,b' \t\n\r\x0b\x0c')  # minden whitespace torlese: display : none, display:\tnone, es a sortoressel szettort stilus is
+        hidden= b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or (b'opacity:' in tag and opacity_hidden(tag))
+
     if debug:
-      html+=[_c(ttag if in_block and ttag in colors else '_text',data[q:p].rstrip())+b'\n']
+      html+=[_c(ttag if in_block and ttag in colors else '_hidden' if hidden else '_text',_debug_shorten(data[q:p].rstrip()))+b'\n']
       if warning: html+=[_c('_warn',b' <!> |' + warning.encode("utf-8",errors="ignore"))]  # beirjuk a sorok koze inkabb!
       warning=""
 
@@ -645,10 +655,7 @@ def html2text(data,debug=False,colors=None):
     txt=data[q:p]
 #    print(q,p,tt,ttag,txt) # debug
 
-    if b'style' in tag: # detect hidden text!
-        tag=tag.translate(None,b' \t\n\r\x0b\x0c')  # minden whitespace torlese: display : none, display:\tnone, es a sortoressel
-                                                    # szettort stilus is (a Postfix pl. 990 karakternel CRLF+szokozzel tordel: font-s\n ize:1px)
-        if b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or (b'opacity:' in tag and opacity_hidden(tag)):
+    if hidden:
             if b'signedadaptivecard' in tag: continue # ms teams hidden base64 data!!!
 #            if b'display:none' in tag and len(text.strip())==0:
             if b'display:none' in tag and tlen==0:
@@ -856,6 +863,7 @@ def get_mimedata(eml,colors=None):
                     html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
                     dtext,dhtml=html2text(pay,debug=True,colors=colors)  # html prettify :)
                     pay=b''.join(dhtml)
+                    if cset: pay=safe_decode(pay,charset_name(cset)).encode("utf-8")  # a nyers (pl. latin2) byte-ok helyett utf-8, hogy a nezo ekezetesen mutassa
         mimeinfo.append(s)
 
         # Attachment file:
