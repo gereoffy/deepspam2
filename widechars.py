@@ -1,5 +1,7 @@
 #! /usr/bin/python3
 
+import unicodedata
+
 # based on https://github.com/jquast/wcwidth   (Python library that measures the width of unicode strings rendered to a terminal)
 
 WIDE_EASTASIAN = (
@@ -189,23 +191,35 @@ ZERO_WIDTH_CF = set([
 ])
 
 
+# nulla szelessegu (lathatatlan vagy az elozo karakterhez tapado) karakter: a kezzel felvett lista, a combining jelek (Mn, Me),
+# a formazo karakterek (Cf: bidi jelek, ZWJ, tag-ek...) es a hangul maganhangzo / zaro jamo (az elozo szotagjelhez tapad)
+def is_zero_width(ucs):
+    return ucs in ZERO_WIDTH_CF or unicodedata.category(chr(ucs)) in ('Mn', 'Me', 'Cf') or 0x1160 <= ucs <= 0x11FF or 0xD7B0 <= ucs <= 0xD7FF
+
+# C0 / C1 vezerlokarakter (az ESC-szekvenciak igy nem jutnak a terminalra)
+def is_control(ucs):
+    return ucs < 32 or 0x07F <= ucs < 0x0A0
+
 def wcwidth(wc):
     ucs = ord(wc)
-    if ucs in ZERO_WIDTH_CF: return 0
+    if is_zero_width(ucs): return 0
 
     # C0/C1 control characters
-    if ucs < 32 or 0x07F <= ucs < 0x0A0: return -1
+    if is_control(ucs): return -1
 
     # "Wide AastAsian" (and emojis)
     return 1 + _bisearch(ucs, WIDE_EASTASIAN)
 
-def ucsremove(s): # unicode shit remover
-    return "".join(["" if ord(c) in ZERO_WIDTH_CF else c for c in s])
+def ucsremove(s): # unicode shit remover: a nulla szelessegu es a (nem whitespace) vezerlokarakterek eldobasa
+    if s.isascii() and s.isprintable(): return s # quickpath
+    s=unicodedata.normalize("NFC",s) # a szetszedett ekezetek (e + U+0301) es hangul jamo-k osszerakasa, mielott a combining jelek kiesnek
+    return "".join(["" if is_zero_width(ord(c)) or (is_control(ord(c)) and not c.isspace()) else c for c in s])
 
 # a dupla szeles karakterek (kinai/japan irasjelek, emojik) beszurunk egy zero-width space-t, igy karakter darabszamra is 2 lesz, de megjelenitve meg nem csuszik el
 def wcfixchar(wc):
     ucs = ord(wc)
-    if ucs in ZERO_WIDTH_CF or ucs>=0xE0000: return "" # drop zero-width (invisible) chars
+    if ucs>=0xE0000 or is_zero_width(ucs): return "" # drop zero-width (invisible) chars
+    if is_control(ucs): return " " if wc.isspace() else "" # vezerlok: whitespace -> szokoz, a tobbi (ESC, BEL...) eldobva
     if ucs>=0x1100 and _bisearch(ucs, WIDE_EASTASIAN): return wc+chr(0x200B) # add padding for known wide chars
     if 0x1F000 <= ucs < 0x20000:
         if 0x1F110 <= ucs < 0x1F190:
@@ -217,7 +231,8 @@ def wcfixchar(wc):
 def wcfixstr(s):
     if not s: return s # no string, no fun...
 #    if not s or max(s)<chr(0x1100): return s # quickpath
-    if max(s)<chr(0x024F) and not chr(0) in s and not chr(0xAD) in s: return s # quickpath
+    if max(s)<chr(0x024F) and s.isprintable() and not chr(0xAD) in s: return s # quickpath (isprintable: nincs vezerlo, NUL, \x85)
+    s=unicodedata.normalize("NFC",s) # a szetszedett ekezetek (e + U+0301) es hangul jamo-k osszerakasa, mielott a combining jelek kiesnek
     return "".join([wcfixchar(c) for c in s])
 #    return "".join([wcfixchar(c) if ord(c)>=0x1100 else c for c in s])
 #    return "".join([chr(0x200B)*_bisearch(ord(c),WIDE_EASTASIAN)+c if ord(c)>=0x1100 else c for c in s])
