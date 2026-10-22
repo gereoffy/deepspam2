@@ -421,6 +421,18 @@ pub fn safe_decode(data: &[u8], cs: Option<&str>, errors: Errors) -> String {
         _ => "utf-8",
     };
     let Some(codec) = lookup(name) else { return decode_utf8(data, Errors::Mixed) };
+    // 7 bites, shift-szekvencias kodlap (eml2str._SHIFT_CODECS), de a shift-jelolo elo sem fordul: a kodlap csak ASCII-t adhatna,
+    // a 8 bites byte-ok mas kodlapbol jonnek -> utf-8 + mixed visszaeses (iso2022_kr es hz: Unsupported, az amugy is visszaesik)
+    let shift = match codec.kind {
+        Kind::Mb(enc) if enc == encoding_rs::ISO_2022_JP => Some(0x1bu8),
+        Kind::Utf7 => Some(b'+'),
+        _ => None,
+    };
+    if let Some(m) = shift {
+        if !data.contains(&m) {
+            return decode_utf8(data, Errors::Mixed);
+        }
+    }
     if matches!(codec.name, "cp1252" | "iso8859-1" | "iso8859-2" | "cp1250") {
         if let Ok(s) = std::str::from_utf8(data) {
             return s.to_string();
@@ -437,8 +449,41 @@ pub fn safe_decode(data: &[u8], cs: Option<&str>, errors: Errors) -> String {
     decode(data, codec, errors).unwrap_or_else(|_| decode_utf8(data, Errors::Mixed))
 }
 
-/// eml2str.fix_chars(): invalid_charrefs csere a dekodolt szovegen
+/// eml2str.fix_mojibake(): a MOJI tabla alakjai (magyar / nemet ekezetes betuk es nehany irasjel hibasan dekodolt utf-8 alakja,
+/// "Ã¡rvÃ­ztÅ±rÅ‘" -> "árvíztűrő") egy menetben, balrol jobbra, a hosszabb alak elobb (a tabla igy van rendezve)
+fn fix_mojibake(s: String) -> String {
+    static LEADS: OnceLock<Vec<char>> = OnceLock::new();
+    let leads = LEADS.get_or_init(|| {
+        let mut v: Vec<char> = tables::MOJI.iter().filter_map(|&(k, _)| k.chars().next()).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    });
+    // gyorsut: egyik alak elso karaktere sincs a szovegben
+    if !s.chars().any(|c| leads.contains(&c)) {
+        return s;
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        let rest = &s[i..];
+        let c = rest.chars().next().unwrap();
+        if leads.contains(&c) {
+            if let Some(&(k, t)) = tables::MOJI.iter().find(|&&(k, _)| rest.starts_with(k)) {
+                out.push(t);
+                i += k.len();
+                continue;
+            }
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// eml2str.fix_chars(): fix_mojibake + invalid_charrefs csere a dekodolt szovegen
 pub fn fix_chars(s: String) -> String {
+    let s = fix_mojibake(s);
     let r = registry();
     let repl = |c: char| -> Option<&'static str> {
         let u = c as u32;

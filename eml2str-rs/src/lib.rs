@@ -113,7 +113,7 @@ pub fn decode_payload(data: &[u8], ctyp: &str, charset: Option<&str>) -> Result<
                 return Err(PyErr("ValueError")); // codec-nevben NUL: "embedded null character"
             }
             if !ascii_compatible(&csn) {
-                conv = Some(safe_decode(data, Some(&csn), Errors::Ignore).into_bytes());
+                conv = Some(safe_decode(data, Some(&csn), Errors::Mixed).into_bytes()); // mixed: a kosza 8 bites byte-ok megmaradnak
                 charset = Some("utf-8".to_string());
             }
         }

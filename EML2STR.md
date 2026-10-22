@@ -29,9 +29,13 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
 | `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. A `0x100` feletti bejegyzések a láthatatlan (nulla szélességű) karakterek (`U+034F`, `U+200B–200F`, `U+202A–202E`, `U+2060–2064`, `U+2066–206F` bidi-izolátorok és elavult formázók, `U+FE0E/FE0F`, `U+FEFF`; a spamszűrő tokenizerének / `widechars.ZERO_WIDTH_CF` listája és a bidi-izolátorok), ezeket a `fix_chars()` eldobja; a `U+2028/2029` sor-/bekezdéselválasztó sortörés (`\n`) lesz, mint a `<br>`/`<p>` a `html2text()`-ben, a keskeny szóközök (`U+2009`, `U+200A`, `U+202F`) pedig sima szóköz; a `mixed` hibakezelőt nem érintik, az csak bájtokkal dolgozik. |
 | `_FIX_TABLE` | `dict[int, str]` | Az `invalid_charrefs` `str.translate()`-hez (`fix_chars()`). |
+| `_MOJI_EXTRA` | `str` | A `fix_mojibake()` további célkarakterei a magyar betűkön túl: `’ – —`, a `U+FFFD` csere-karakter, a nbsp (`Â` + nbsp, `Ã‚Â` + nbsp), `© ·` (`Â©`, `Â·`) és a tipográfiai szóközök `U+2000–200A`, `U+202F` (`â€‰`, `â€Š`); a nbsp és a keskeny szóközök a `translate`-ben sima szóközzé válnak. |
+| `_MOJI`, `_MOJI_RE`, `_MOJI_LEADS` | `dict[str, str]`, `re.Pattern`, `set[str]` | A `_ACCENT_LETTERS` + `_MOJI_EXTRA` karakterek UTF-8 bájtjainak hibásan dekódolt alakjai (latin1, cp1252, cp1250 és a `mixed` hibakezelő szerint, egyszeres és dupla mojibake; 309 alak, pl. `Ã¡` → `á`, `Ăˇ` → `á`, `Å‘` → `ő`, `â€™` → `’`, `Ã¯Â¿Â½` → `U+FFFD`) a `fix_mojibake()`-hez, a regex pontosan ezeket illeszti, a hosszabbat előbb. |
 | `BOMS` | `tuple` | BOM → kódlap (`utf-8`, `utf-32-le/be`, `utf-16-le/be`; a `utf-32-le` a vele azonosan kezdődő `utf-16-le` előtt). A `decode_payload()` használja. |
+| `_SHIFT_CODECS` | `dict[str, bytes]` | A 7 bites, shift-szekvenciás kódlapok kanonikus neve → a shift-jelölő bájt (`safe_decode()`: jelölő nélkül a kódlapot figyelmen kívül hagyja). |
 | `_ASCII_PROBE` | `bytes` | Próbaszöveg az `ascii_compatible()`-hez: a utf-7 (`+x-`), hz (`~~`), iso-2022 (`ESC $ B`) és utf-16/32 (páratlan hossz) mind elrontja. |
-| `_HU_U8` | `re.Pattern` | UTF-8 kódolt magyar ékezetes betűk (`ÁÉÍÓÖÚÜáéíóöúüŐőŰű`) az `is_utf8_mixed()`-hez. |
+| `_ACCENT_LETTERS` | `str` | A magyar és a hiányzó német ékezetes betűk (`áéíóöőúüűÁÉÍÓÖŐÚÜŰäÄß`): ebből épül a `_ACCENT_U8` és a `_MOJI` is. |
+| `_ACCENT_U8` | `re.Pattern` | A `_ACCENT_LETTERS` UTF-8 bájtpárjai (kezdőbájtonként csoportosítva) az `is_utf8_mixed()`-hez. |
 | `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_font_re`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, a fonttábla `\fN` bejegyzéseit kereső regex (`rtf_font_codepages()`), és a nevesített írásjelek / szimbólumok leképezése. |
 | `INLINE_TAGS` | `set[str]` | A `html2text()` soron belüli tagjei, amik nem törik meg a szót (nem kerül szóköz a helyükre); lásd ott. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
@@ -192,7 +196,7 @@ Lépések:
    kódlappal → `rtf_to_text_safe()`; ha ez is hibázik, a nyers TNEF adat marad);
    HTML (vagy HTML-nek *látszó* text/plain) → charset felülírás a `<head>`-ből (`parse_htmlhead()`, BOM esetén nem),
    nem ASCII-kompatibilis kódlapnál (`ascii_compatible()`: iso-2022-*, utf-16/32, utf-7, hz) előzetes dekódolás
-   UTF-8-ra (`safe_decode(..., "ignore")`), majd `html2text()`.
+   UTF-8-ra (`safe_decode()`, `mixed` hibakezelővel, hogy a kósza 8 bites bájtok megmaradjanak), majd `html2text()`.
 2. Charset feloldás: alapértelmezés `iso8859-1`, felülírások a `charset_name()` szerint (az aliasokat a codec-kereső kezeli).
    `application/rtf` esetén az RTF saját `\ansicpg`-je elsőbbséget kap (`parse_rtfhead()`).
 3. Dekódolás: ASCII-kompatibilis kódlapnál előbb szigorú UTF-8 (gyakran UTF-8 a más charsettel jelölt szöveg),
@@ -367,7 +371,10 @@ Hibatűrő dekódolás a `cs` kódlappal.
 
 - `data`: `bytes`, `cs`: `str | None` (a `charset_name()` utáni név), `errors`: hibakezelő (`"mixed"` vagy `"ignore"`).
 - **Visszatérés:** `str`. Ha a kódlap nem létezik vagy nem használható (`LookupError`: `unknown-8bit`, `base64`…;
-  `UnicodeError`: `undefined`, `idna`), UTF-8 `"mixed"`-del dekódol. Latin1/2 (`cp1252`, `iso8859-1/2`, `cp1250`)
+  `UnicodeError`: `undefined`, `idna`), UTF-8 `"mixed"`-del dekódol. Ugyanígy, ha a kódlap 7 bites, shift-szekvenciás
+  (`_SHIFT_CODECS`: iso-2022-jp/kr → ESC, hz → `~`, utf-7 → `+`), de a shift-jelölő elő sem fordul az adatban: akkor a kódlap
+  csak ASCII-t adhatna, a 8 bites bájtok más kódlapból jönnek (pl. iso-2022-jp fejléc, latin1 szöveg), ezért a deklarált kódlapot
+  figyelmen kívül hagyja. Latin1/2 (`cp1252`, `iso8859-1/2`, `cp1250`)
   kódlapnál előbb szigorú UTF-8-at próbál, és ha az nem megy, de az `is_utf8_mixed()` szerint UTF-8 ékezetek vannak
   benne (pl. levelezőlista-lábléc, idézett UTF-8 rész), hibatűrő UTF-8-at a `mixed_iso8859-2` / `mixed_cp1250` /
   `mixed` hibakezelővel.
@@ -384,9 +391,19 @@ más kódlapoknál tévesen is kijöhet).
 
 - **Visszatérés:** `bool`
 
+### `fix_mojibake(s)`
+Szűk célkészletű mojibake-javítás: az UTF-8 szöveg tévesen egybájtos kódlappal dekódolt alakja (duplán kódolt levél, vagy
+a `mixed` hibakezelővel bájtonként dekódolt UTF-8) visszaalakul: `Ã¡rvÃ­ztÅ±rÅ‘` → `árvíztűrő`, `â€™` → `’`, `Ã¯Â¿Â½` → `U+FFFD`.
+Csak a `_ACCENT_LETTERS` és a `_MOJI_EXTRA` karaktereire, azok minden ismert alakjára (`_MOJI`, 309 alak: latin1, cp1252, cp1250
+és a `mixed` hibakezelő szerint, egyszeres és dupla mojibake), egy menetben, balról jobbra, a hosszabb alak előbb. Az általános
+(minden UTF-8 sorozatra kiterjedő) javítás túl kockázatos lenne; ezek az alakok valódi szövegben nem fordulnak elő.
+
+- `s`: `str` → **Visszatérés:** `str`
+
 ### `fix_chars(s)`
-Az `invalid_charrefs` csere a dekódolt szövegen (C1 → cp1252 írásjelek, `Õ Û õ û` → `Ő Ű ő ű`, nbsp, soft hyphen…),
-`str.translate()`-tel.
+A `fix_mojibake()` után az `invalid_charrefs` csere a dekódolt szövegen (C1 → cp1252 írásjelek, `Õ Û õ û` → `Ő Ű ő ű`, nbsp,
+soft hyphen, láthatatlan és vezérlő karakterek…), `str.translate()`-tel. A sorrend fontos: a mojibake-párok második
+karaktere C1 karakter is lehet, amit a translate már eldobna vagy átírna.
 
 - `s`: `str` → **Visszatérés:** `str`
 

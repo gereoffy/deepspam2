@@ -128,7 +128,7 @@ Nem portolt, mert az `eml2str()` nem használja: `get_mimedata`, `readfolder`, `
 
 A charset-kezelés a Python `codecs` viselkedését követi. Ezt a fordításkor generált `tables.rs` biztosítja:
 codec-névfeloldás (`codecs.lookup` + az `eml2str` saját aliasai és felülírásai), a Python egybájtos kódtáblái,
-HTML5-entitások, `invalid_charrefs`, és a Unicode decimális számjegy-blokkok (`ND_ZEROS`, a `unicodedata`-ból): az RTF
+HTML5-entitások, `invalid_charrefs`, a mojibake-alakok (`MOJI`, a `fix_chars` előtti `fix_mojibake`-hez), és a Unicode decimális számjegy-blokkok (`ND_ZEROS`, a `unicodedata`-ból): az RTF
 `\uN`, `\ucN`, `\binN`, `\fN`, `\fcharsetN` argumentumában a Python `re` `\d`-je és az `int()` minden Nd számjegyet
 elfogad, a Rust ugyanezt a táblát használja. A utf-7 dekóder a CPython C-kódját követi, a CJK kódlapokat az
 encoding_rs dekódolja.

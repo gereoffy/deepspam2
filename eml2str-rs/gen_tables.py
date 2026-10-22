@@ -109,6 +109,8 @@ for k in sorted(H._invalid_charrefs): o.write('    (%d, %s),\n' % (k, rs(H._inva
 o.write('];\n\npub static HTML_INVALID_CODEPOINTS: &[u32] = &[%s];\n\n' % ','.join(str(c) for c in sorted(H._invalid_codepoints)))
 o.write('pub static INVALID_CHARREFS: &[(u32, &str)] = &[  // eml2str.invalid_charrefs\n')
 for k in sorted(eml2str.invalid_charrefs): o.write('    (%d, %s),\n' % (k, rs(eml2str.invalid_charrefs[k])))
+o.write('];\n\n/// eml2str._MOJI: hibasan dekodolt alak -> celkarakter (a hosszabb alakok elobb)\npub static MOJI: &[(&str, char)] = &[\n')
+for k in sorted(eml2str._MOJI, key=lambda k: (-len(k), k)): o.write("    (%s, '\\u{%x}'),\n" % (rs(k), ord(eml2str._MOJI[k])))
 o.write('];\n\npub static CHARSET_OVERRIDES: &[(&str, &str)] = &[\n')
 for k in sorted(eml2str.charset_overrides): o.write('    (%s, %s),\n' % (rs(k), rs(eml2str.charset_overrides[k])))
 o.write('];\n')
