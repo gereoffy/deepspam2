@@ -574,6 +574,11 @@ TAG_END_RE=re.compile(rb'''
   )*
   >?''', re.X)
 
+# soron beluli (phrasing) tagek, amik nem torik meg a szot (a html2text nem tesz szokozt a helyukre): szovegszintu jelolok,
+# sub/sup, a nulla szelessegu wbr, a (gyakran 1px-es, szo kozepebe szurt) img, es a kommentek / <?..?> ('!', '?')
+INLINE_TAGS={'wbr','span','a','b','i','u','em','strong','abbr','font','s','strike','small','big','tt','sub','sup','code','kbd',
+    'samp','var','cite','q','dfn','mark','ins','del','bdi','bdo','time','data','label','nobr','acronym','blink','img','!','?'}
+
 OPACITY_RE=re.compile(rb'opacity:([0-9]*\.?[0-9]+)(%?)')
 
 # a html2text debug kimeneteben a hosszu (>= 64 karakter) beagyazott base64 adat (data: URI-k: kepek, fontok) roviditese
@@ -738,7 +743,9 @@ def html2text(data,debug=False,colors=None):
     if tag==b'div' or (tt>=0 and ttag in ['p','br','tr']):
         text+=[b'<BR>']  # https://www.w3schools.com/html/html_blocks.asp
     else:
-        if not ttag in ['span','a','b','i','u','em','strong','abbr','font','!','?']: text+=[b' '] # not inline elements (a comment sem: vi<!-- x -->agra = viagra)
+        # inline (phrasing) elemek es a kommentek nem torik meg a szot: vi<!-- x -->agra = viagra, acco<wbr>unt, acco<img src=1px>unt,
+        # x<sup>2</sup>; minden mas tag (blokkok, listaelemek, cellak, form-vezerlok, ruby rt/rp...) szokozt tesz
+        if not ttag in INLINE_TAGS: text+=[b' ']
     text+=[txt]
     tlen+=len(txt.strip())
 
@@ -749,7 +756,9 @@ def html2text(data,debug=False,colors=None):
   text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
 
   urls=list(dict.fromkeys(urls))  # sorrend-megorzo dedup az URL listan
-  for url in urls: text+=b'\nURL: '+url[:128].encode("utf-8")
+#  for url in urls: text+=b'\nURL: '+url[:128].encode("utf-8")
+  if debug:
+    for url in urls: html+=[b'\nURL: '+url[:128].encode("utf-8")]
 
   if debug: return text, html
   return text

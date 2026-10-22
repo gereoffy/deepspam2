@@ -75,21 +75,9 @@ pub fn py_isspace(c: char) -> bool {
         | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
 }
 
-/// str.strip()
-pub fn py_strip(s: &str) -> &str {
-    s.trim_matches(py_isspace)
-}
-
 /// len(str) - kodpontok szama
 #[inline]
 pub fn py_len(s: &str) -> usize {
     s.chars().count()
 }
 
-/// s[:n] kodpontokban
-pub fn py_prefix(s: &str, n: usize) -> &str {
-    match s.char_indices().nth(n) {
-        Some((i, _)) => &s[..i],
-        None => s,
-    }
-}

@@ -122,7 +122,7 @@ kódlap-könyvtára, a táblái a binárisba fordulnak).
 Ha élesben bármelyik csomag telepítve van, az RTF- vs. TNEF-tartalmú levelekre a Python kimenete el fog térni ettől.
 
 Nem portolt, mert az `eml2str()` nem használja: `get_mimedata`, `readfolder`, `decode_from`, `parse_docx`,
-`vocab_split`, `remove_url`.
+`vocab_split`, `remove_url`, `html_extract_attr` / `LINK_ATTRS` (az `URL:` sorok csak a `html2text(debug=True)` kimenetében vannak).
 
 ## Táblák (Python-verziófüggő!)
 
@@ -139,7 +139,7 @@ encoding_rs dekódolja.
 |---|---|
 | `src/lib.rs` | `eml2str()`, `decode_payload()`, `hdrdecode4()`, `parse_ics()`, `remove_spamtag()` |
 | `src/mime.rs` | `parse_eml()`, `parse_ctyp()`, `decode_body()`, a `binascii` `a2b_base64` / `a2b_qp` pontos megfelelője |
-| `src/html.rs` | `html2text()`, `html.unescape()` (Python stdlib), `parse_htmlhead()`, `html_extract_attr()` |
+| `src/html.rs` | `html2text()`, `html.unescape()` (Python stdlib), `parse_htmlhead()` (az URL-kinyerés nincs portolva: a Python csak a debug kimenetbe teszi) |
 | `src/rtf.rs` | `parse_rtfhead()`, a tartalék RTF-kinyerő (a legkülső `}` után vége, tartományon kívüli `\uN` → U+FFFD, johab fallback), `fix_surrogates()` |
 | `src/codec.rs` | `codecs.lookup`, `safe_decode()`, `ascii_compatible()`, a `mixed` hibakezelők, UTF-8/16/32, egybájtos kódlapok |
 | `src/utf7.rs` | utf-7 dekóder |

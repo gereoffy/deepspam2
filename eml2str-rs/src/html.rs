@@ -1,6 +1,6 @@
 //! html.unescape (Python stdlib), html2text, parse_htmlhead
+//! (az URL-kinyeres - LINK_ATTRS / html_extract_attr - nincs portolva: a Python csak a debug kimenetbe teszi, a szovegbe nem)
 
-use crate::codec::{decode_utf8, Errors};
 use crate::tables;
 use crate::util::*;
 use std::collections::{HashMap, HashSet};
@@ -115,62 +115,6 @@ pub fn unescape(s: &str) -> String {
     }
     out.push_str(&s[last..]);
     out
-}
-
-const LINK_ATTRS: &[(&[u8], &[u8])] = &[
-    (b"a", b"href"),
-    (b"area", b"href"),
-    (b"base", b"href"),
-    (b"link", b"href"),
-    (b"iframe", b"src"),
-    (b"frame", b"src"),
-    (b"form", b"action"),
-];
-
-#[inline]
-fn is_bword(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// html_extract_attr(): (?<![\w-])ATTR\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))  IGNORECASE, search
-pub fn html_extract_attr(rawtag: &[u8], attr: &[u8]) -> Option<String> {
-    let n = rawtag.len();
-    let al = attr.len();
-    let mut i = 0;
-    while i + al <= n {
-        if rawtag[i..i + al].eq_ignore_ascii_case(attr) && (i == 0 || !(is_bword(rawtag[i - 1]) || rawtag[i - 1] == b'-')) {
-            let mut k = i + al;
-            while k < n && is_bws(rawtag[k]) {
-                k += 1;
-            }
-            if k < n && rawtag[k] == b'=' {
-                k += 1;
-                while k < n && is_bws(rawtag[k]) {
-                    k += 1;
-                }
-                let mut val: Option<&[u8]> = None;
-                if k < n && (rawtag[k] == b'"' || rawtag[k] == b'\'') {
-                    if let Some(e) = find(rawtag, &[rawtag[k]], k + 1) {
-                        val = Some(&rawtag[k + 1..e]);
-                    }
-                }
-                if val.is_none() {
-                    let mut e = k;
-                    while e < n && !is_bws(rawtag[e]) && rawtag[e] != b'>' {
-                        e += 1;
-                    }
-                    if e > k {
-                        val = Some(&rawtag[k..e]);
-                    }
-                }
-                if let Some(v) = val {
-                    return Some(py_strip(&unescape(&decode_utf8(v, Errors::Mixed))).to_string());
-                }
-            }
-        }
-        i += 1;
-    }
-    None
 }
 
 /// parse_htmlhead(): <meta ... charset=XXX> a <body> elotti reszben
@@ -313,7 +257,6 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
     let mut text: Vec<u8> = Vec::with_capacity(n / 2);
     text.extend_from_slice(&data[..p]);
     let mut tlen = 0usize;
-    let mut urls: Vec<String> = Vec::new();
     let mut tagbuf: Vec<u8> = Vec::new();
 
     while p < n {
@@ -335,16 +278,6 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         let (tt, ttag) = tag_type(tag);
         let ttag = ttag.to_vec();
         let in_block = tt > 0 && matches!(ttag.as_slice(), b"style" | b"script" | b"title" | b"svg" | b"annotation");
-
-        if tt >= 0 {
-            if let Some(&(_, attr)) = LINK_ATTRS.iter().find(|(t, _)| *t == ttag.as_slice()) {
-                if let Some(url) = html_extract_attr(rawtag, attr) {
-                    if !url.is_empty() {
-                        urls.push(url);
-                    }
-                }
-            }
-        }
 
         // a kovetkezo tag
         let mut np = find(data, b"<", q);
@@ -410,8 +343,14 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
 
         if tag == b"div" || (tt >= 0 && matches!(ttag.as_slice(), b"p" | b"br" | b"tr")) {
             text.extend_from_slice(b"<BR>");
-        } else if !matches!(ttag.as_slice(), b"span" | b"a" | b"b" | b"i" | b"u" | b"em" | b"strong" | b"abbr" | b"font" | b"!" | b"?") {
-            // (a comment sem tesz szokozt: vi<!-- x -->agra = viagra)
+        } else if !matches!(
+            ttag.as_slice(),
+            b"wbr" | b"span" | b"a" | b"b" | b"i" | b"u" | b"em" | b"strong" | b"abbr" | b"font" | b"s" | b"strike" | b"small" | b"big" | b"tt"
+                | b"sub" | b"sup" | b"code" | b"kbd" | b"samp" | b"var" | b"cite" | b"q" | b"dfn" | b"mark" | b"ins" | b"del" | b"bdi" | b"bdo"
+                | b"time" | b"data" | b"label" | b"nobr" | b"acronym" | b"blink" | b"img" | b"!" | b"?"
+        ) {
+            // inline (phrasing) elemek es a kommentek nem torik meg a szot (eml2str.INLINE_TAGS): vi<!-- x -->agra = viagra,
+            // acco<wbr>unt, acco<img src=1px>unt, x<sup>2</sup>; minden mas tag szokozt tesz
             text.push(b' ');
         }
         text.extend_from_slice(txt);
@@ -438,13 +377,6 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         }
     }
 
-    let mut seen = HashSet::new();
-    for url in urls {
-        if seen.insert(url.clone()) {
-            out.extend_from_slice(b"\nURL: ");
-            out.extend_from_slice(py_prefix(&url, 128).as_bytes());
-        }
-    }
     out
 }
 

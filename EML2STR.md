@@ -27,12 +27,13 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `codec_aliases` | `dict[str, str]` | A Python által nem ismert karakterkészlet-nevek (pl. `x-cp1250`, `ks_c_5601-1989`, `x-mac-ce`, a striprtf nem létező `mac_*` nevei) → Python codec-nevek. A modul betöltésekor `codecs.register()`-rel regisztrált codec-kereső kezeli őket, így *bármelyik* `decode()` / `codecs.lookup()` felismeri őket (a striprtf-ben is), kis- és nagybetűtől függetlenül. |
 | `charset_overrides` | `dict[str, str]` | Szándékos felülírások olyan nevekre, amiket a Python is ismer, de másképp dekódolna: a `latin1`/`iso-8859-1`/`us-ascii` → `windows-1252`, `iso-8859-9` → `windows-1254`, `gb2312` → `gbk`, `utf-16` → `utf-16le` stb. Csak a modul saját dekódolásainál érvényes, a `charset_name()`-en keresztül (globálisan nem írható át, mert pl. az `email` modul a pontos latin-1-re épít). |
 | `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
-| `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. |
+| `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. A `0x100` feletti bejegyzések a láthatatlan (nulla szélességű) karakterek (`U+034F`, `U+200B–200F`, `U+202A–202E`, `U+2060–2064`, `U+2066–206F` bidi-izolátorok és elavult formázók, `U+FE0E/FE0F`, `U+FEFF`; a spamszűrő tokenizerének / `widechars.ZERO_WIDTH_CF` listája és a bidi-izolátorok), ezeket a `fix_chars()` eldobja; a `U+2028/2029` sor-/bekezdéselválasztó sortörés (`\n`) lesz, mint a `<br>`/`<p>` a `html2text()`-ben, a keskeny szóközök (`U+2009`, `U+200A`, `U+202F`) pedig sima szóköz; a `mixed` hibakezelőt nem érintik, az csak bájtokkal dolgozik. |
 | `_FIX_TABLE` | `dict[int, str]` | Az `invalid_charrefs` `str.translate()`-hez (`fix_chars()`). |
 | `BOMS` | `tuple` | BOM → kódlap (`utf-8`, `utf-32-le/be`, `utf-16-le/be`; a `utf-32-le` a vele azonosan kezdődő `utf-16-le` előtt). A `decode_payload()` használja. |
 | `_ASCII_PROBE` | `bytes` | Próbaszöveg az `ascii_compatible()`-hez: a utf-7 (`+x-`), hz (`~~`), iso-2022 (`ESC $ B`) és utf-16/32 (páratlan hossz) mind elrontja. |
 | `_HU_U8` | `re.Pattern` | UTF-8 kódolt magyar ékezetes betűk (`ÁÉÍÓÖÚÜáéíóöúüŐőŰű`) az `is_utf8_mixed()`-hez. |
 | `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_font_re`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, a fonttábla `\fN` bejegyzéseit kereső regex (`rtf_font_codepages()`), és a nevesített írásjelek / szimbólumok leképezése. |
+| `INLINE_TAGS` | `set[str]` | A `html2text()` soron belüli tagjei, amik nem törik meg a szót (nem kerül szóköz a helyükre); lásd ott. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
 | `TAG_END_RE` | `re.Pattern` | A tag végének keresése a HTML5 tokenizer szerint (lásd `html2text()`). |
 | `TAG_END_USE_RE` | `bool` | `True` CPythonban: a `html2text()` a `TAG_END_RE`-t használja. PyPy alatt `False`: ott ugyanez bájtonkénti ciklussal fut, mert a JIT-elt ciklus a gyorsabb. |
@@ -252,11 +253,14 @@ Jellemzők:
   `mso-hide:all`, `opacity` 0.5 alatt (`opacity_hidden()`). A tag utáni szöveg (a következő tagig) kimarad;
   kivétel a levél eleji (még szöveg előtti) rejtett "preheader", ami `[...]` közé téve bekerül.
   MS Teams `signedadaptivecard` rejtett base64 adat kihagyva.
-- `div`, `p`, `br`, `tr` → sortörés; inline elemek (`span`, `a`, `b`, …) és a kommentek (`<!--…-->`, `<!…>`,
-  `<?…>`) nem tesznek szóközt (`vi<!-- x -->agra` → `viagra`), a többi tag szóközt tesz.
+- `div`, `p`, `br`, `tr` → sortörés; a soron belüli (phrasing) elemek (`INLINE_TAGS`: `span`, `a`, `b`, `i`, `u`, `em`, `strong`,
+  `abbr`, `font`, `s`, `strike`, `small`, `big`, `tt`, `sub`, `sup`, `code`, `kbd`, `samp`, `var`, `cite`, `q`, `dfn`, `mark`, `ins`,
+  `del`, `bdi`, `bdo`, `time`, `data`, `label`, `nobr`, `acronym`, `blink`, a nulla szélességű `wbr` és az `img`) és a kommentek
+  (`<!--…-->`, `<!…>`, `<?…>`) nem tesznek szóközt (`vi<!-- x -->agra` → `viagra`, `acco<wbr>unt` → `account`,
+  `acco<img src=1px.gif>unt` → `account`), minden más tag (blokkok, listaelemek, cellák, form-vezérlők, `rt`/`rp`) szóközt tesz.
 - Felesleges whitespace összevonása, soronkénti strip.
-- A `LINK_ATTRS` szerinti linkek (sorrendtartó deduplikálással) a szöveg végére kerülnek
-  `URL: <max. 128 karakter>` sorokként.
+- A `LINK_ATTRS` szerinti linkek (sorrendtartó deduplikálással) csak `debug=True` esetén, a debug HTML végére kerülnek
+  `URL: <max. 128 karakter>` sorokként; a kinyert szövegbe nem (a Rust port ezért nem is gyűjti őket).
 - A HTML entitásokat itt **nem** oldja fel (azt a `decode_payload()` teszi dekódolás után).
 
 ### `opacity_hidden(tag)`
