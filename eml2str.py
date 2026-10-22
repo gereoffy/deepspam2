@@ -177,7 +177,41 @@ def charset_name(cset):
 
 # based on:  /usr/lib/python3.10/html/__init__.py
 invalid_charrefs = {
-    0x00: ' ',        # REPLACEMENT CHARACTER
+    # ascii control codes:
+    0x00: ' ',       # REPLACEMENT CHARACTER
+    0x01: '',
+    0x02: '',
+    0x03: '',
+    0x04: '',
+    0x05: '',
+    0x06: '',
+    0x07: '',        # BELL (ascii 7)
+    0x08: '',        # BS (ascii 8) - backspace
+#   0x09: '\t',      # HT (ascii 9) - horizontal TAB
+#   0x0A: '\r',      # CR (ascii 10) - line feed
+    0x0B: '\n',      # VT (ascii 11) - vertical tabulation
+    0x0C: '\n',      # FF (ascii 12) - form feed
+#   0x0D: '\n',      # LF (ascii 13) - carriage return
+    0x0E: '',
+    0x0F: '',
+    0x10: '',
+    0x11: '',
+    0x12: '',
+    0x13: '',
+    0x14: '',
+    0x15: '',
+    0x16: '',
+    0x17: '',
+    0x18: '',
+    0x19: '',
+    0x1A: '',
+    0x1B: '^[',      # ESC (ascii 27) - ESCAPE!
+    0x1C: '\n',      # FS (ascii 28) - file separator
+    0x1D: '\n',      # GS (ascii 29) - group separator
+    0x1E: '\n',      # RS (ascii 30) - record separator
+    0x1F: ' ',       # US (ascii 31) - unit separator
+    0x7F: '',        # DEL
+    # 8-bit chars of cp1250(preferred) or cp1252:  (missing from latin1/latin2)
     0x80: '\u20ac',  # EURO SIGN
     0x81: '',        # <control>
     0x82: '\u201a',  # SINGLE LOW-9 QUOTATION MARK
@@ -217,6 +251,42 @@ invalid_charrefs = {
     0xDB: '\u0170',  # U^ => U"
     0xF5: '\u0151',  # o~ => o"
     0xFB: '\u0171',  # u^ => u"
+    # lathatatlan (nulla szelessegu) karakterek: (lasd widechars.ZERO_WIDTH_CF)
+    0x034F: '',      # combining grapheme joiner
+    0x2009: ' ',     # Thin Space
+    0x200A: ' ',     # Hair Space - lehet, hogy ezt is el kene dobni, mert ugyse latszik?
+    0x200B: '',      # zero width space
+    0x200C: '',      # zero width non-joiner
+    0x200D: '',      # zero width joiner
+    0x200E: '',      # left-to-right mark
+    0x200F: '',      # right-to-left mark
+    0x2028: '\n',    # line separator -> sortores (mint a html2text a <br>-t), a szavak ne ragadjanak ossze
+    0x2029: '\n',    # paragraph separator -> sortores
+    0x202A: '',      # left-to-right embedding
+    0x202B: '',      # right-to-left embedding
+    0x202C: '',      # pop directional formatting
+    0x202D: '',      # left-to-right override
+    0x202E: '',      # right-to-left override
+    0x202F: ' ',     # Narrow No-Break Space (NNBSP)
+    0x2060: '',      # word joiner
+    0x2061: '',      # function application
+    0x2062: '',      # invisible times
+    0x2063: '',      # invisible separator
+    0x2064: '',      # Invisible Plus
+    0x2065: '',      # <invalid code>
+    0x2066: '',      # left-to-right isolate (a 202A-202E modern megfeleloi)
+    0x2067: '',      # right-to-left isolate
+    0x2068: '',      # first strong isolate
+    0x2069: '',      # pop directional isolate
+    0x206A: '',      # inhibit symmetric swapping (elavult formazok)
+    0x206B: '',      # activate symmetric swapping
+    0x206C: '',      # inhibit arabic form shaping
+    0x206D: '',      # activate arabic form shaping
+    0x206E: '',      # national digit shapes
+    0x206F: '',      # nominal digit shapes
+    0xFE0E: '',      # Variation selector:  The character U+FE0E VARIATION SELECTOR-15 (VS15), used to request a text presentation for an emoji character.
+    0xFE0F: '',      # Variation selector:  The character U+FE0F VARIATION SELECTOR-16 (VS16), used to request an emoji presentation for an emoji character.
+    0xFEFF: ''       # BOM, ZWNBSP, ZERO WIDTH NO-BREAK SPACE. Unicode Hexadecimal: 0xFEFF. Unicode Decimal: 65279
 }
 
 

@@ -59,6 +59,8 @@ struct Registry {
     custom: HashMap<&'static str, u16>,
     overrides: HashMap<&'static str, &'static str>,
     charrefs: [Option<&'static str>; 256],
+    /// az invalid_charrefs 0x100 feletti bejegyzesei (lathatatlan karakterek): csak a fix_chars hasznalja
+    charrefs_hi: HashMap<u32, &'static str>,
     latin2_hi: [char; 96],
     cp1250_hi: [char; 96],
 }
@@ -71,8 +73,13 @@ fn registry() -> &'static Registry {
             .map(|&(name, kind, ascii_ok, rtf_ok)| Codec { name, kind, ascii_ok, rtf_ok })
             .collect();
         let mut charrefs = [None; 256];
+        let mut charrefs_hi = HashMap::new();
         for &(k, v) in tables::INVALID_CHARREFS {
-            charrefs[k as usize] = Some(v);
+            if k < 256 {
+                charrefs[k as usize] = Some(v);
+            } else {
+                charrefs_hi.insert(k, v);
+            }
         }
         let hi = |name: &str| -> [char; 96] {
             let c = codecs.iter().find(|c| c.name == name).expect(name);
@@ -92,6 +99,7 @@ fn registry() -> &'static Registry {
             overrides: tables::CHARSET_OVERRIDES.iter().copied().collect(),
             codecs,
             charrefs,
+            charrefs_hi,
             latin2_hi,
             cp1250_hi,
         }
@@ -432,13 +440,17 @@ pub fn safe_decode(data: &[u8], cs: Option<&str>, errors: Errors) -> String {
 /// eml2str.fix_chars(): invalid_charrefs csere a dekodolt szovegen
 pub fn fix_chars(s: String) -> String {
     let r = registry();
+    let repl = |c: char| -> Option<&'static str> {
+        let u = c as u32;
+        if u < 256 { r.charrefs[u as usize] } else if u < 0x34f { None } else { r.charrefs_hi.get(&u).copied() }
+    };
     // gyors ut: nincs csereolando karakter
-    if !s.chars().any(|c| (c as u32) < 256 && r.charrefs[c as usize].is_some()) {
+    if !s.chars().any(|c| repl(c).is_some()) {
         return s;
     }
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        match if (c as u32) < 256 { r.charrefs[c as usize] } else { None } {
+        match repl(c) {
             Some(v) => out.push_str(v),
             None => out.push(c),
         }
