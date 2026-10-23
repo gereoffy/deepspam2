@@ -353,9 +353,10 @@ _ACCENT_LETTERS="áéíóöőúüűÁÉÍÓÖŐÚÜŰäÄß"  # a magyar es a hi
 # A celkarakter utf-8 byte-jainak alakjai kodlaponkent: latin1 (Ã/Å/â + nyers C1 vagy U+00A0-00BF), cp1252 (irasjelek: Å‘, â€™),
 # cp1250 (a kezdobyte is mas: Ăˇ, Ĺ‘), es a sajat mixed hibakezelo alakja (a folytatok az invalid_charrefs szerint); a kodlapban
 # nem definialt byte-u alakok kimaradnak. Ketszeres (dupla) mojibake is: az egyszeres alak ujra utf-8 -> kodlap korre (Ã¯Â¿Â½ -> U+FFFD).
-# ’ – — U+FFFD, a nbsp (Â + nbsp / Ã‚Â + nbsp szemet), © · (Â© / Ã‚Â©), es a tipografiai szokozok U+2000-200A, U+202F (â€‰, â€Š...);
-# a nbsp-t es a keskeny szokozoket a translate utana sima szokozre csereli
-_MOJI_EXTRA="\u2019\u2013\u2014\ufffd\u00a0\u00a9\u00b7\u202f"+"".join(chr(c) for c in range(0x2000,0x200b))
+# irasjelek: ’ – — „ “ ” … • € ™ ® © · (Â©, â€™, â„¢, â‚¬...), a U+FFFD csere-karakter, a VS15/VS16 emoji-szelektorok (ï¸Ź; a translate
+# utana eldobja oket), a nbsp (Â + nbsp / Ã‚Â + nbsp szemet) es a tipografiai szokozok U+2000-200A, U+202F (â€‰, â€Š...; a nbsp-t
+# es a keskeny szokozoket a translate utana sima szokozre csereli)
+_MOJI_EXTRA="\u2019\u2013\u2014\u201e\u201c\u201d\u2026\u2022\u20ac\u2122\u00ae\u00a9\u00b7\ufffd\ufe0e\ufe0f\u00a0\u202f"+"".join(chr(c) for c in range(0x2000,0x200b))
 _MOJI={}
 def _moji_forms(b):
     # egy utf-8 byte-sorozat lehetseges hibas dekodolasai (str-ek), ures ha a kodlapban nincs definialva valamelyik byte
