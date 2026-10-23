@@ -172,6 +172,56 @@ pub fn mixed_cp1250() -> Errors {
     Errors::MixedCs(&registry().cp1250_hi)
 }
 
+/// eml2str.cesu8_pair(): CESU-8 / WTF-8 surrogate-par (ED A0..AF xx ED B0..BF xx) a pos-tol -> a teljes karakter (6 byte)
+pub(crate) fn cesu8_pair(data: &[u8], pos: usize) -> Option<char> {
+    let d = data.get(pos..pos + 6)?;
+    if d[0] == 0xed && (0xa0..=0xaf).contains(&d[1]) && (0x80..=0xbf).contains(&d[2]) && d[3] == 0xed && (0xb0..=0xbf).contains(&d[4]) && (0x80..=0xbf).contains(&d[5]) {
+        let hi = 0xd000 | ((d[1] as u32 & 0x3f) << 6) | (d[2] as u32 & 0x3f);
+        let lo = 0xd000 | ((d[4] as u32 & 0x3f) << 6) | (d[5] as u32 & 0x3f);
+        return char::from_u32(0x10000 + ((hi - 0xd800) << 10) + (lo - 0xdc00));
+    }
+    None
+}
+
+/// a mixed / mixed_* hibakezelo egy hibahelyen (Python: mixed_decoder / _mixed_factory handler): CESU-8 par -> a karakter es
+/// 6 byte-tal tovabb, kulonben a hibas byte invalid_charrefs / latin1 szerint es 1 byte-tal tovabb. Visszaadja az uj poziciot.
+pub(crate) fn handler_at(out: &mut String, data: &[u8], pos: usize, errors: Errors) -> usize {
+    if !matches!(errors, Errors::Ignore) {
+        if let Some(c) = cesu8_pair(data, pos) {
+            out.push(c);
+            return pos + 6;
+        }
+    }
+    handler_push(out, data[pos], errors);
+    pos + 1
+}
+
+/// eml2str.decode_utf8_cesu(): szigoru utf-8, de a CESU-8 surrogate-parokat elfogadja es osszevonja; None, ha mas hiba van
+pub fn decode_utf8_cesu(data: &[u8]) -> Option<String> {
+    match std::str::from_utf8(data) {
+        Ok(s) => return Some(s.to_string()),
+        Err(e) if cesu8_pair(data, e.valid_up_to()).is_none() => return None,
+        Err(_) => {}
+    }
+    let mut out = String::with_capacity(data.len());
+    let mut rest = data;
+    loop {
+        match std::str::from_utf8(rest) {
+            Ok(s) => {
+                out.push_str(s);
+                return Some(out);
+            }
+            Err(e) => {
+                let good = e.valid_up_to();
+                let c = cesu8_pair(rest, good)?;
+                out.push_str(unsafe { std::str::from_utf8_unchecked(&rest[..good]) });
+                out.push(c);
+                rest = &rest[good + 6..];
+            }
+        }
+    }
+}
+
 /// data.decode("utf-8", errors) - a hibas szekvencia elso byte-ja a handler-hez, folytatas a kovetkezo byte-tol
 /// (ignore eseten a teljes hibas szekvencia atugrasa, mint a Pythonban)
 pub fn decode_utf8(data: &[u8], errors: Errors) -> String {
@@ -186,15 +236,14 @@ pub fn decode_utf8(data: &[u8], errors: Errors) -> String {
             Err(e) => {
                 let good = e.valid_up_to();
                 out.push_str(unsafe { std::str::from_utf8_unchecked(&rest[..good]) });
-                let b = rest[good];
                 match errors {
                     Errors::Ignore => {
                         let n = e.error_len().unwrap_or(rest.len() - good);
                         rest = &rest[good + n..];
                     }
                     _ => {
-                        handler_push(&mut out, b, errors);
-                        rest = &rest[good + 1..];
+                        let np = handler_at(&mut out, rest, good, errors);
+                        rest = &rest[np..];
                     }
                 }
             }
@@ -250,10 +299,7 @@ fn decode_utf16(data: &[u8], le: bool, errors: Errors) -> String {
         }
         match errors {
             Errors::Ignore => i = end,
-            _ => {
-                handler_push(&mut out, data[start], errors);
-                i = start + 1;
-            }
+            _ => i = handler_at(&mut out, data, start, errors),
         }
     }
     out
@@ -281,10 +327,7 @@ fn decode_utf32(data: &[u8], le: bool, errors: Errors) -> String {
         }
         match errors {
             Errors::Ignore => i = end,
-            _ => {
-                handler_push(&mut out, data[start], errors);
-                i = start + 1;
-            }
+            _ => i = handler_at(&mut out, data, start, errors),
         }
     }
     out
@@ -315,10 +358,7 @@ fn decode_mb(data: &[u8], enc: &'static encoding_rs::Encoding, errors: Errors) -
                     let bad_start = pos + read_total - extra as usize - bad as usize;
                     match errors {
                         Errors::Ignore => pos = bad_start + (bad as usize).max(1),
-                        _ => {
-                            handler_push(&mut out, data[bad_start], errors);
-                            pos = bad_start + 1;
-                        }
+                        _ => pos = handler_at(&mut out, data, bad_start, errors),
                     }
                     break;
                 }
@@ -336,11 +376,13 @@ pub fn decode(data: &[u8], codec: &Codec, errors: Errors) -> Result<String, Deco
         Kind::Latin1 => data.iter().map(|&b| b as char).collect(),
         Kind::Ascii => {
             let mut out = String::with_capacity(data.len());
-            for &b in data {
-                if b < 0x80 {
-                    out.push(b as char)
+            let mut i = 0;
+            while i < data.len() {
+                if data[i] < 0x80 {
+                    out.push(data[i] as char);
+                    i += 1;
                 } else {
-                    handler_push(&mut out, b, errors)
+                    i = handler_at(&mut out, data, i, errors);
                 }
             }
             out
@@ -370,12 +412,14 @@ pub fn decode(data: &[u8], codec: &Codec, errors: Errors) -> Result<String, Deco
         Kind::Charmap(t) => {
             let tbl = &tables::CHARMAPS[t];
             let mut out = String::with_capacity(data.len() + data.len() / 2);
-            for &b in data {
-                let c = tbl[b as usize];
+            let mut i = 0;
+            while i < data.len() {
+                let c = tbl[data[i] as usize];
                 if c == 0xfffe {
-                    handler_push(&mut out, b, errors)
+                    i = handler_at(&mut out, data, i, errors);
                 } else {
-                    push_cp(&mut out, c)
+                    push_cp(&mut out, c);
+                    i += 1;
                 }
             }
             out
@@ -434,8 +478,8 @@ pub fn safe_decode(data: &[u8], cs: Option<&str>, errors: Errors) -> String {
         }
     }
     if matches!(codec.name, "cp1252" | "iso8859-1" | "iso8859-2" | "cp1250") {
-        if let Ok(s) = std::str::from_utf8(data) {
-            return s.to_string();
+        if let Some(s) = decode_utf8_cesu(data) {
+            return s; // gyakran utf-8 a latin1/2-nek jelolt szoveg; CESU-8 parokkal is
         }
         if is_utf8_mixed(data, 4) {
             let h = match codec.name {

@@ -1,7 +1,7 @@
 //! utf-7 dekoder a CPython PyUnicode_DecodeUTF7Stateful alapjan - a hibak helye es kezelese is a Pythonnal azonos
 //! (a 'mixed' / 'ignore' hibakezelo miatt fontos).
 
-use crate::codec::{handler_push, Errors};
+use crate::codec::{handler_at, Errors};
 
 #[inline]
 fn is_b64(c: u8) -> bool {
@@ -100,10 +100,7 @@ pub fn decode_utf7(data: &[u8], errors: Errors) -> String {
             if let Some(e) = err_end {
                 s = match errors {
                     Errors::Ignore => e,
-                    _ => {
-                        handler_push(&mut out, data[startinpos], errors);
-                        startinpos + 1
-                    }
+                    _ => handler_at(&mut out, data, startinpos, errors),
                 };
             }
         }
@@ -113,10 +110,7 @@ pub fn decode_utf7(data: &[u8], errors: Errors) -> String {
             if surrogate != 0 || b64bits >= 6 || (b64bits > 0 && b64buf != 0) {
                 s = match errors {
                     Errors::Ignore => n,
-                    _ => {
-                        handler_push(&mut out, data[startinpos], errors);
-                        startinpos + 1
-                    }
+                    _ => handler_at(&mut out, data, startinpos, errors),
                 };
                 if s < n {
                     continue;

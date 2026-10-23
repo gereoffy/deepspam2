@@ -141,7 +141,7 @@ encoding_rs dekódolja.
 | `src/mime.rs` | `parse_eml()`, `parse_ctyp()`, `decode_body()`, a `binascii` `a2b_base64` / `a2b_qp` pontos megfelelője |
 | `src/html.rs` | `html2text()`, `html.unescape()` (Python stdlib), `parse_htmlhead()` (az URL-kinyerés nincs portolva: a Python csak a debug kimenetbe teszi) |
 | `src/rtf.rs` | `parse_rtfhead()`, a tartalék RTF-kinyerő (a legkülső `}` után vége, tartományon kívüli `\uN` → U+FFFD, johab fallback), `fix_surrogates()` |
-| `src/codec.rs` | `codecs.lookup`, `safe_decode()`, `ascii_compatible()`, a `mixed` hibakezelők, UTF-8/16/32, egybájtos kódlapok |
+| `src/codec.rs` | `codecs.lookup`, `safe_decode()`, `ascii_compatible()`, a `mixed` hibakezelők (CESU-8 párokkal, `handler_at`), `decode_utf8_cesu()`, UTF-8/16/32, egybájtos kódlapok |
 | `src/utf7.rs` | utf-7 dekóder |
 | `src/python.rs` | a Python-modul (`eml2str_rs`, a `python` feature-rel) |
 | `build.rs`, `gen_tables.py` | a codec-, entitás- és Unicode-számjegy táblák generálása fordításkor |

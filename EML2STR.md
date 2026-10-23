@@ -53,7 +53,8 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 
 A modul betöltésekor regisztrálódik a **`"mixed"`** nevű codec hibakezelő (`codecs.register_error`),
 így bármely `bytes.decode(..., "mixed")` hívás a hibás bájtokat nem dobja el, hanem latin1/cp1252
-szerint (az `invalid_charrefs` táblával) karakterré alakítja. Ugyanígy működik a **`"mixed_iso8859-2"`** és a
+szerint (az `invalid_charrefs` táblával) karakterré alakítja; kivétel a CESU-8 / WTF-8 surrogate-pár (`cesu8_pair()`: egy
+UTF-16 párként, 2×3 bájttal kódolt karakter, pl. emoji, amit a szigorú UTF-8 elutasít), azt egyben a valódi karakterré alakítja. Ugyanígy működik a **`"mixed_iso8859-2"`** és a
 **`"mixed_cp1250"`** hibakezelő, csak ezeknél a felső fél (`A0–FF`) a latin2 ill. cp1250 szerint dekódolódik
 (`_mixed_factory()`); a `safe_decode()` használja őket a latin2 / cp1250 jelölésű, de UTF-8-at is tartalmazó szövegekhez.
 
@@ -366,6 +367,17 @@ Heurisztikus UTF-8 detektor: megszámolja a helyes és hibás többbájtos szekv
   (Tisztán ASCII bemenetre `False`.)
 - A modul jelenleg nem használja (a `decode_payload()` szigorú UTF-8 próbát és `safe_decode()`-ot használ).
 
+### `cesu8_pair(data, pos)`
+CESU-8 / WTF-8 surrogate-pár felismerése a `pos` pozíción: `ED A0..AF xx ED B0..BF xx` (UTF-16 belső ábrázolású rendszerek,
+pl. Java, régi MySQL `utf8`, JavaScript így írnak ki egy U+10000 feletti karaktert). **Visszatérés:** `(karakter, 6)` vagy `None`.
+A `mixed` / `mixed_*` hibakezelők és a `decode_utf8_cesu()` használja.
+
+### `decode_utf8_cesu(data)`
+Szigorú UTF-8 dekódolás, amely a CESU-8 surrogate-párokat elfogadja és egy karakterré vonja össze; **Visszatérés:** `str`, vagy
+`None`, ha bármilyen más hiba (érvénytelen bájt, magában álló surrogate) van az adatban. A `decode_payload()` és a
+`safe_decode()` "gyakran UTF-8 a latin1-nek jelölt szöveg" próbája ezt használja a sima `decode("utf-8", "strict")` helyett, így a
+CESU-8-at tartalmazó, charset nélküli (vagy latin1/2 jelölésű) levél sem esik vissza a cp1252 szerinti bájtonkénti értelmezésre.
+
 ### `safe_decode(data, cs, errors="mixed")`
 Hibatűrő dekódolás a `cs` kódlappal.
 
@@ -375,7 +387,7 @@ Hibatűrő dekódolás a `cs` kódlappal.
   (`_SHIFT_CODECS`: iso-2022-jp/kr → ESC, hz → `~`, utf-7 → `+`), de a shift-jelölő elő sem fordul az adatban: akkor a kódlap
   csak ASCII-t adhatna, a 8 bites bájtok más kódlapból jönnek (pl. iso-2022-jp fejléc, latin1 szöveg), ezért a deklarált kódlapot
   figyelmen kívül hagyja. Latin1/2 (`cp1252`, `iso8859-1/2`, `cp1250`)
-  kódlapnál előbb szigorú UTF-8-at próbál, és ha az nem megy, de az `is_utf8_mixed()` szerint UTF-8 ékezetek vannak
+  kódlapnál előbb szigorú UTF-8-at próbál (`decode_utf8_cesu()`, CESU-8 párokkal is), és ha az nem megy, de az `is_utf8_mixed()` szerint UTF-8 ékezetek vannak
   benne (pl. levelezőlista-lábléc, idézett UTF-8 rész), hibatűrő UTF-8-at a `mixed_iso8859-2` / `mixed_cp1250` /
   `mixed` hibakezelővel.
 

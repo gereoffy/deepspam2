@@ -290,8 +290,29 @@ invalid_charrefs = {
 }
 
 
+def cesu8_pair(data,pos):
+    # CESU-8 / WTF-8: az UTF-16 surrogate par (pl. emoji) 2x3 byte-kent kodolva (ED A0..AF xx ED B0..BF xx), a szigoru utf-8 elutasitja.
+    # Ha ez all pos-tol, a teljes karakter (U+10000..) es a hossz (6), kulonben None
+    if pos+6<=len(data) and data[pos]==0xED and 0xA0<=data[pos+1]<=0xAF and 0x80<=data[pos+2]<=0xBF \
+       and data[pos+3]==0xED and 0xB0<=data[pos+4]<=0xBF and 0x80<=data[pos+5]<=0xBF:
+        hi=0xD000|((data[pos+1]&0x3F)<<6)|(data[pos+2]&0x3F)
+        lo=0xD000|((data[pos+4]&0x3F)<<6)|(data[pos+5]&0x3F)
+        return chr(0x10000+((hi-0xD800)<<10)+(lo-0xDC00)), 6
+    return None
+
+def decode_utf8_cesu(data):
+    # szigoru utf-8, de a CESU-8 surrogate-parokat (cesu8_pair) elfogadja es osszevonja; None, ha barmi mas hiba van benne
+    # (a decode_payload es a safe_decode "gyakran utf-8 a latin1-nek jelolt szoveg" probaja: a CESU-8 miatt ne essen vissza cp1252-re)
+    try: return data.decode("utf-8","strict")
+    except UnicodeDecodeError: pass
+    if b'\xed\xa0' not in data and b'\xed\xa1' not in data and not any(bytes([0xed,x]) in data for x in range(0xa2,0xb0)): return None  # nincs high surrogate
+    try: return data.decode("utf-8","surrogatepass").encode("utf-16","surrogatepass").decode("utf-16")  # parok osszevonasa; magaban allo surrogate -> hiba
+    except UnicodeDecodeError: return None
+
 def mixed_decoder(unicode_error):
     position = unicode_error.start
+    cesu = cesu8_pair(unicode_error.object, position)
+    if cesu: return cesu[0], position + cesu[1]
 #    new_char = unicode_error.object[position:position+1]
 #    new_char = new_char.decode("iso8859-1","ignore")
     new_char = unicode_error.object[position] # csak 1 byte kell!
@@ -307,6 +328,8 @@ def _mixed_factory(cs):
     # mint a mixed, de a felso fel (A0..FF) a megadott kodlap szerint (latin2 / cp1250), a 80..9F marad az invalid_charrefs
     tbl=bytes(range(0xa0,0x100)).decode(cs)
     def handler(e):
+        cesu=cesu8_pair(e.object,e.start)
+        if cesu: return cesu[0], e.start+cesu[1]
         b=e.object[e.start]
         return (tbl[b-0xa0] if b>=0xa0 else invalid_charrefs.get(b,chr(b)), e.start+1)
     return handler
@@ -327,8 +350,8 @@ def safe_decode(data,cs,errors="mixed"):
         cs=codecs.lookup(cs or "utf-8").name
         if cs in _SHIFT_CODECS and _SHIFT_CODECS[cs] not in data: return data.decode("utf-8","mixed") # shift nelkul a kodlap nem ervenyes
         if cs in ["cp1252","iso8859-1","iso8859-2","cp1250"]: # latin1/2 kanonikus nevei (a charset_name utan a latin1/us-ascii mar cp1252)
-            try: return data.decode("utf-8","strict")  # gyakran utf-8 a latin1/2-nek jelolt szoveg (rovid fejlecekben is)
-            except UnicodeDecodeError: pass
+            u=decode_utf8_cesu(data)  # gyakran utf-8 a latin1/2-nek jelolt szoveg (rovid fejlecekben is); CESU-8 parokkal is
+            if u is not None: return u
             if is_utf8_mixed(data): return data.decode("utf-8","mixed_"+cs if cs in ("iso8859-2","cp1250") else "mixed")
         return data.decode(cs,errors)
     except (LookupError,UnicodeError): return data.decode("utf-8","mixed")
@@ -921,8 +944,8 @@ def decode_payload(data,ctyp="text/html",charset=None):
 
     # elobb strict utf-8 (gyakran utf-8 a szoveg mas charset cimkevel), ha nem az: a deklaralt kodlap mixed modban.
     # Nem ASCII-kompatibilis kodlapnal (utf-16/32, utf-7, iso-2022-jp, hz) nincs utf-8 proba, ott a 7 bites byte-sor tevesen atmenne
-    try: data=data.decode("utf-8","strict") if ascii_compatible(charset) else safe_decode(data,charset)
-    except UnicodeDecodeError: data=safe_decode(data,charset)  # latin1/2 + utf-8 keverek, ismeretlen kodlap: lasd safe_decode
+    u=decode_utf8_cesu(data) if ascii_compatible(charset) else None  # szigoru utf-8 (CESU-8 parokkal is)
+    data=u if u is not None else safe_decode(data,charset)  # latin1/2 + utf-8 keverek, ismeretlen kodlap: lasd safe_decode
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":

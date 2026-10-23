@@ -130,13 +130,10 @@ pub fn decode_payload(data: &[u8], ctyp: &str, charset: Option<&str>) -> Result<
         return Err(PyErr("ValueError"));
     }
 
-    let text = if ascii_compatible(&charset) {
-        match std::str::from_utf8(data) {
-            Ok(s) => s.to_string(),
-            Err(_) => safe_decode(data, Some(&charset), Errors::Mixed),
-        }
-    } else {
-        safe_decode(data, Some(&charset), Errors::Mixed)
+    // szigoru utf-8 (CESU-8 surrogate-parokkal is), ha nem megy: safe_decode (latin1/2 + utf-8 keverek, ismeretlen kodlap...)
+    let text = match if ascii_compatible(&charset) { codec::decode_utf8_cesu(data) } else { None } {
+        Some(s) => s,
+        None => safe_decode(data, Some(&charset), Errors::Mixed),
     };
 
     let text = if is_rtf { rtf::rtf_to_text(&text, &rtf::rtf_hex_encoding(&charset))? } else { html::unescape(&text) };
