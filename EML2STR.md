@@ -27,10 +27,11 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `codec_aliases` | `dict[str, str]` | A Python által nem ismert karakterkészlet-nevek (pl. `x-cp1250`, `ks_c_5601-1989`, `x-mac-ce`, a striprtf nem létező `mac_*` nevei) → Python codec-nevek. A modul betöltésekor `codecs.register()`-rel regisztrált codec-kereső kezeli őket, így *bármelyik* `decode()` / `codecs.lookup()` felismeri őket (a striprtf-ben is), kis- és nagybetűtől függetlenül. |
 | `charset_overrides` | `dict[str, str]` | Szándékos felülírások olyan nevekre, amiket a Python is ismer, de másképp dekódolna: a `latin1`/`iso-8859-1`/`us-ascii` → `windows-1252`, `iso-8859-9` → `windows-1254`, `gb2312` → `gbk`, `utf-16` → `utf-16le` stb. Csak a modul saját dekódolásainál érvényes, a `charset_name()`-en keresztül (globálisan nem írható át, mert pl. az `email` modul a pontos latin-1-re épít). |
 | `charset_name(cset)` | függvény | MIME / HTML charset név → a dekódoláshoz használandó név (a `charset_overrides` alkalmazása; `None`/üres változatlan). |
-| `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, a `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. A `0x100` feletti bejegyzések a láthatatlan (nulla szélességű) karakterek (`U+034F`, `U+200B–200F`, `U+202A–202E`, `U+2060–2064`, `U+2066–206F` bidi-izolátorok és elavult formázók, `U+FE0E/FE0F`, `U+FEFF`; a spamszűrő tokenizerének / `widechars.ZERO_WIDTH_CF` listája és a bidi-izolátorok), ezeket a `fix_chars()` eldobja; a `U+2028/2029` sor-/bekezdéselválasztó sortörés (`\n`) lesz, mint a `<br>`/`<p>` a `html2text()`-ben, a keskeny szóközök (`U+2009`, `U+200A`, `U+202F`) pedig sima szóköz; a `mixed` hibakezelőt nem érintik, az csak bájtokkal dolgozik. |
-| `_FIX_TABLE` | `dict[int, str]` | Az `invalid_charrefs` `str.translate()`-hez (`fix_chars()`). |
-| `_MOJI_EXTRA` | `str` | A `fix_mojibake()` további célkarakterei a magyar betűkön túl: írásjelek `’ – — „ “ ” … • € ™ ® © ·` (`â€™`, `â„¢`, `â‚¬`, `Â©`…), a `U+FFFD` csere-karakter, a VS15/VS16 emoji-szelektorok (`ï¸Ź`; a `translate` utána eldobja), a nbsp (`Â` + nbsp, `Ã‚Â` + nbsp) és a tipográfiai szóközök `U+2000–200A`, `U+202F` (`â€‰`, `â€Š`); a nbsp és a keskeny szóközök a `translate`-ben sima szóközzé válnak. |
-| `_MOJI`, `_MOJI_RE`, `_MOJI_LEADS` | `dict[str, str]`, `re.Pattern`, `set[str]` | A `_ACCENT_LETTERS` + `_MOJI_EXTRA` karakterek UTF-8 bájtjainak hibásan dekódolt alakjai (latin1, cp1252, cp1250 és a `mixed` hibakezelő szerint, egyszeres és dupla mojibake; 402 alak, pl. `Ã¡` → `á`, `Ăˇ` → `á`, `Å‘` → `ő`, `â€™` → `’`, `Ã¯Â¿Â½` → `U+FFFD`) a `fix_mojibake()`-hez, a regex pontosan ezeket illeszti, a hosszabbat előbb. |
+| `invalid_charrefs` | `dict[int, str]` | Kódpont → helyettesítő karakter. A `0x80–0x9F` tartományt cp1252 szerint értelmezi, kivéve a `0x88`-at: az cp1252-ben a `ˆ` módosító (`U+02C6`), ami önálló karakterként nem fordul elő, cp1250-ben nincs, cp1251-ben viszont `€`, ezért `€` lesz (a hamis cp1251 címkés, UTF-8 `mixed`-del dekódolt levelek `€`-ja így megmarad; a HTML `&#136;` a HTML5 tábla szerint továbbra is `ˆ`). A `NUL`/`NBSP` szóközzé, a soft hyphen üressé válik, és a magyar `ő/Ő/ű/Ű` latin1-es "rossz" megfelelőit (`õ, Õ, û, Û`) latin2-es betűkre javítja. A `0x100` feletti bejegyzések a láthatatlan (nulla szélességű) karakterek (`U+034F`, `U+200B–200F`, `U+202A–202E`, `U+2060–2064`, `U+2066–206F` bidi-izolátorok és elavult formázók, `U+FE0E/FE0F`, `U+FEFF`; a spamszűrő tokenizerének / `widechars.ZERO_WIDTH_CF` listája és a bidi-izolátorok), ezeket a `fix_chars()` eldobja; a `U+2028/2029` sor-/bekezdéselválasztó sortörés (`\n`) lesz, mint a `<br>`/`<p>` a `html2text()`-ben, a keskeny szóközök (`U+2009`, `U+200A`, `U+202F`) pedig sima szóköz; a `mixed` hibakezelőt nem érintik, az csak bájtokkal dolgozik. |
+| `mixed_charrefs` | `dict[int, str]` | Az `invalid_charrefs` `0x80–0xFF` része: a `mixed` / `mixed_*` hibakezelőkhöz (a dekóder által hibásnak jelzett bájt → karakter). |
+| `_FIX_TABLE` | `dict[int, str]` | A teljes `invalid_charrefs` a `fix_chars()` `str.translate()`-éhez. |
+| `_MOJI_EXTRA` | `str` | A `fix_mojibake()` további célkarakterei az ékezetes betűkön túl: a Latin-1 `A1–BF` blokk jelei (`¡ ¢ £ § ° ± « » ¿ © · ®`…: `Â¢`, `Â£`, `Â«`), a cp1252 írásjelei `’ ‘ ‚ – — „ “ ” ‹ › … • ‡ ‰ € ™ ˆ ˜ ƒ` (`â€™`, `â€ž`, `â„¢`, `â‚¬`…; a `†` nincs köztük, mert az alakja `â€` + nbsp/szóköz, ami csonka mojibake után is előfordul), a `❤` (`âť¤`), a `U+FFFD` csere-karakter, a VS15/VS16 emoji-szelektorok (`ï¸Ź`; a `translate` utána eldobja), a nbsp (`Â` + nbsp, `Ã‚Â` + nbsp) és a tipográfiai szóközök `U+2000–200A`, `U+202F` (`â€‰`, `â€Š`); a nbsp és a keskeny szóközök a `translate`-ben sima szóközzé válnak. |
+| `_MOJI`, `_MOJI_RE`, `_MOJI_LEADS` | `dict[str, str]`, `re.Pattern`, `set[str]` | A `_ACCENT_LETTERS` + `_MOJI_EXTRA` karakterek UTF-8 bájtjainak hibásan dekódolt alakjai a `fix_mojibake()`-hez (947 alak, pl. `Ã¡` → `á`, `Ăˇ` → `á`, `Å‘` → `ő`, `â€™` → `’`, `Ã¯Â¿Â½` → `U+FFFD`). Az egyszeres alakok a bájtonkénti lehetséges leolvasások (`_moji_byte_alts()`: nyers latin1 `chr()`, cp1252, cp1250, `invalid_charrefs`) minden kombinációja (`_moji_forms(b, full=True)`), mert egy szövegen belül is keveredhetnek: a HTML `&#128;` a HTML5 tábla szerint `€`, de a `&#157;` nyers `U+009D` (`â€\x9d` → `”`), vagy a vezető bájt cp1250 szerint `Ă`, a folytató nyers C1 (`Ă\x96` → `Ö`, `Ă\x81` → `Á`). A dupla mojibake (az egyszeres alak újra UTF-8 → kódlap körre) csak egész kódlapos alakokkal (latin1, cp1252, cp1250, `mixed`), különben robbanna a tábla. Két célkarakternek nem lehet közös alakja (assert), kivéve két szóközt: a `U+2000` és a `U+2008` alakja egyaránt `â€€` (a `0x80` és a `0x88` is `€`), az az elsőként felvett `U+2000` marad. A regex pontosan ezeket illeszti, a hosszabbat előbb. |
 | `BOMS` | `tuple` | BOM → kódlap (`utf-8`, `utf-32-le/be`, `utf-16-le/be`; a `utf-32-le` a vele azonosan kezdődő `utf-16-le` előtt). A `decode_payload()` használja. |
 | `_SHIFT_CODECS` | `dict[str, bytes]` | A 7 bites, shift-szekvenciás kódlapok kanonikus neve → a shift-jelölő bájt (`safe_decode()`: jelölő nélkül a kódlapot figyelmen kívül hagyja). |
 | `_ASCII_PROBE` | `bytes` | Próbaszöveg az `ascii_compatible()`-hez: a utf-7 (`+x-`), hz (`~~`), iso-2022 (`ESC $ B`) és utf-16/32 (páratlan hossz) mind elrontja. |
@@ -42,6 +43,7 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `TAG_END_RE` | `re.Pattern` | A tag végének keresése a HTML5 tokenizer szerint (lásd `html2text()`). |
 | `TAG_END_USE_RE` | `bool` | `True` CPythonban: a `html2text()` a `TAG_END_RE`-t használja. PyPy alatt `False`: ott ugyanez bájtonkénti ciklussal fut, mert a JIT-elt ciklus a gyorsabb. |
 | `OPACITY_RE` | `re.Pattern` | Az `opacity:` értéke (szám, opcionálisan `%`) az `opacity_hidden()`-hez. |
+| `FONTSIZE_RE`, `_FONTSIZE_PX` | `re.Pattern`, `dict` | A `font-size:` értéke és mértékegysége, ill. az egységek px-szorzói (`pt`, `pc`, `em`, `rem`, `%`) a `font_size_hidden()`-hez. |
 | `ATTR_RE_CACHE` | `dict[str, re.Pattern]` | Az `html_extract_attr()` lefordított regex-cache-e. |
 | `TAG_RE3`, `TAG_RE4`, `TAG_RE6` | `re.Pattern` | URL, e-mail cím és `.hu` domain felismerő regexek (`remove_url()`). `TAG_RE5` (számok) definiálva, de nincs használva. |
 | `STAG_SA` | `re.Pattern` | SpamAssassin `*****SPAM{15.0}*****` jellegű tárgy-tag. |
@@ -56,7 +58,10 @@ A modul betöltésekor regisztrálódik a **`"mixed"`** nevű codec hibakezelő 
 szerint (az `invalid_charrefs` táblával) karakterré alakítja; kivétel a CESU-8 / WTF-8 surrogate-pár (`cesu8_pair()`: egy
 UTF-16 párként, 2×3 bájttal kódolt karakter, pl. emoji, amit a szigorú UTF-8 elutasít), azt egyben a valódi karakterré alakítja. Ugyanígy működik a **`"mixed_iso8859-2"`** és a
 **`"mixed_cp1250"`** hibakezelő, csak ezeknél a felső fél (`A0–FF`) a latin2 ill. cp1250 szerint dekódolódik
-(`_mixed_factory()`); a `safe_decode()` használja őket a latin2 / cp1250 jelölésű, de UTF-8-at is tartalmazó szövegekhez.
+(`_mixed_factory()`); a `safe_decode()` használja őket a latin2 / cp1250 jelölésű, de UTF-8-at is tartalmazó szövegekhez. A
+**`"mixed_cp1251"`** ugyanez cp1251-gyel, de a `80–FF` tartományra (ott a `80–9F` is cirill betű), a `safe_decode()` `hint`
+paraméteréhez (cp1251 MIME-kódlap, amit a HTML `<meta charset=utf-8>` felülírt), ha a bájtok cirill szövegnek látszanak
+(`_cyrillic_like()`).
 
 ---
 
@@ -254,7 +259,7 @@ Jellemzők:
   Lezáratlan komment (`<!--` után nincs `-->`): az első `>`-ig tart.
 - Rejtett szöveg felismerése a `style`-t tartalmazó tagokban (a vizsgálat előtt a tagból minden whitespace törlődik,
   így a `display : none`, `display:\tnone` és a sortöréssel szétvágott – pl. a Postfix 990 karakteres tördelése miatt
-  `font-s\n ize:1px` – stílus is felismerődik): `display:none`, `font-size:0p…`/`1p…`, `max-height:0p…`,
+  `font-s\n ize:1px` – stílus is felismerődik): `display:none`, `font-size` legfeljebb 2 px (`font_size_hidden()`: az utolsó érték, px-re váltva; egység nélkül csak a `0`), `max-height:0p…`,
   `mso-hide:all`, `opacity` 0.5 alatt (`opacity_hidden()`). A tag utáni szöveg (a következő tagig) kimarad;
   kivétel a levél eleji (még szöveg előtti) rejtett "preheader", ami `[...]` közé téve bekerül.
   MS Teams `signedadaptivecard` rejtett base64 adat kihagyva.
@@ -267,6 +272,12 @@ Jellemzők:
 - A `LINK_ATTRS` szerinti linkek (sorrendtartó deduplikálással) csak `debug=True` esetén, a debug HTML végére kerülnek
   `URL: <max. 128 karakter>` sorokként; a kinyert szövegbe nem (a Rust port ezért nem is gyűjti őket).
 - A HTML entitásokat itt **nem** oldja fel (azt a `decode_payload()` teszi dekódolás után).
+
+### `font_size_hidden(tag)`
+A (whitespace nélküli, kisbetűs) tag utolsó `font-size:` értéke px-re váltva legfeljebb 2 (`0`, `1px`, `2px`, `1.5pt`, `0.1em`,
+`10%`…); egység nélkül csak a `0` számít (a nem nulla egység nélküli érték érvénytelen CSS, látható), ismeretlen egység (`vw`…) látható.
+
+- `tag`: `bytes` → **Visszatérés:** `bool`
 
 ### `opacity_hidden(tag)`
 Az `opacity` alapú elrejtés: a tagban (CSS szerint az utolsó) `opacity:` értéke 0.5 alatt van-e (a `%` alak is).
@@ -378,10 +389,21 @@ Szigorú UTF-8 dekódolás, amely a CESU-8 surrogate-párokat elfogadja és egy 
 `safe_decode()` "gyakran UTF-8 a latin1-nek jelölt szöveg" próbája ezt használja a sima `decode("utf-8", "strict")` helyett, így a
 CESU-8-at tartalmazó, charset nélküli (vagy latin1/2 jelölésű) levél sem esik vissza a cp1252 szerinti bájtonkénti értelmezésre.
 
-### `safe_decode(data, cs, errors="mixed")`
+### `safe_decode(data, cs, errors="mixed", hint=None)`
 Hibatűrő dekódolás a `cs` kódlappal.
 
-- `data`: `bytes`, `cs`: `str | None` (a `charset_name()` utáni név), `errors`: hibakezelő (`"mixed"` vagy `"ignore"`).
+- `data`: `bytes`, `cs`: `str | None` (a `charset_name()` utáni név), `errors`: hibakezelő (`"mixed"` vagy `"ignore"`),
+  `hint`: a MIME-szintű kódlap, ha a HTML `<meta>` felülírta (a `decode_payload()` adja át). Ha a `hint` `cp1251`, a `cs` `utf-8` és a
+  bájtok cirill szövegnek látszanak (`_cyrillic_like()`), az UTF-8-ként érvénytelen bájtok a `mixed_cp1251` kezelővel cp1251 szerint
+  dekódolódnak (`Добрый день!`), nem latin1/cp1252-ként.
+- A **cp1251 címke önmagában nem elég**: sok latin (spanyol, német, angol `£`/`€`) levél jön tévesen `windows-1251` kódlappal, a
+  MIME fejlécben és a HTML `<meta>`-ban is. Ezért ha a `cs` cp1251 (akárhonnan jött), csak akkor dekódol cp1251 szerint, ha a bájtok
+  cirill szövegnek látszanak, különben a címkét hamisnak veszi és – mint az ismeretlen kódlapoknál – UTF-8 `"mixed"`-del
+  (latin1/cp1252 visszaeséssel) dekódol: `Información de su cuenta`, `Grüße`, `£950,000`. A `_cyrillic_like(data)` döntése: a `C0–FF`
+  bájtok (cp1251-ben `А–я`) legalább fele 3+ hosszú, egymás melletti futamban áll-e. Cirill szövegben a szavak ilyen futamok,
+  latin1/2 szövegben az ékezetes betűk elszigeteltek vagy párosak (`año`, `Grüße`, `ção`), érvényes UTF-8-ban pedig két `C0–FF`
+  bájt nem állhat egymás mellett (a vezető bájtot `80–BF` folytatás követi). Egy-két betűs cirill szöveg (pl. `Да` tárgy) így latinnak
+  minősül, ez tudott korlát.
 - **Visszatérés:** `str`. Ha a kódlap nem létezik vagy nem használható (`LookupError`: `unknown-8bit`, `base64`…;
   `UnicodeError`: `undefined`, `idna`), UTF-8 `"mixed"`-del dekódol. Ugyanígy, ha a kódlap 7 bites, shift-szekvenciás
   (`_SHIFT_CODECS`: iso-2022-jp/kr → ESC, hz → `~`, utf-7 → `+`), de a shift-jelölő elő sem fordul az adatban: akkor a kódlap
@@ -406,16 +428,20 @@ más kódlapoknál tévesen is kijöhet).
 ### `fix_mojibake(s)`
 Szűk célkészletű mojibake-javítás: az UTF-8 szöveg tévesen egybájtos kódlappal dekódolt alakja (duplán kódolt levél, vagy
 a `mixed` hibakezelővel bájtonként dekódolt UTF-8) visszaalakul: `Ã¡rvÃ­ztÅ±rÅ‘` → `árvíztűrő`, `â€™` → `’`, `Ã¯Â¿Â½` → `U+FFFD`.
-Csak a `_ACCENT_LETTERS` és a `_MOJI_EXTRA` karaktereire, azok minden ismert alakjára (`_MOJI`, 402 alak: latin1, cp1252, cp1250
-és a `mixed` hibakezelő szerint, egyszeres és dupla mojibake), egy menetben, balról jobbra, a hosszabb alak előbb. Az általános
-(minden UTF-8 sorozatra kiterjedő) javítás túl kockázatos lenne; ezek az alakok valódi szövegben nem fordulnak elő.
+Csak a `_ACCENT_LETTERS` és a `_MOJI_EXTRA` karaktereire, azok minden ismert alakjára (`_MOJI`, 947 alak: bájtonként latin1, cp1252,
+cp1250 és `invalid_charrefs` szerinti leolvasás bármilyen keverékben, plusz az egész kódlapos dupla mojibake), egy menetben, balról
+jobbra, a hosszabb alak előbb. Az általános (minden UTF-8 sorozatra kiterjedő) javítás túl kockázatos lenne; ezek az alakok valódi
+szövegben nem fordulnak elő. A `str.translate()` *előtt* fut, amíg a nyers C1 karakterek megvannak, így a hibrid alakok (`â€\x9d`,
+`Ă\x96`) is javulnak; a nbsp `mixed`-alakja (`Â` + szóköz) a tábla egyetlen ASCII-t tartalmazó egyszeres alakja.
 
 - `s`: `str` → **Visszatérés:** `str`
 
 ### `fix_chars(s)`
-A `fix_mojibake()` után az `invalid_charrefs` csere a dekódolt szövegen (C1 → cp1252 írásjelek, `Õ Û õ û` → `Ő Ű ő ű`, nbsp,
-soft hyphen, láthatatlan és vezérlő karakterek…), `str.translate()`-tel. A sorrend fontos: a mojibake-párok második
-karaktere C1 karakter is lehet, amit a translate már eldobna vagy átírna.
+A `fix_mojibake()` után a `_FIX_TABLE` (= `invalid_charrefs`) csere a dekódolt szövegen (C1 → cp1252 írásjelek, `Õ Û õ û` →
+`Ő Ű ő ű`, nbsp, soft hyphen, láthatatlan és vezérlő karakterek…), `str.translate()`-tel. Az `õû → őű` csere szándékosan
+feltétel nélküli: a levelek magyar / angol nyelvűek, a magyar leveleket gyakran latin1/cp1252 kódlappal vagy latin1-es
+betűkészlettel írt, UTF-8-ként küldött szöveggel küldik, bennük az `õ/û` az `ő/ű` helyett áll; a ritka portugál / francia / észt
+levelek valódi `õ/û`-je így `ő/ű` lesz, nyelvdetektálással nem érdemes próbálkozni.
 
 - `s`: `str` → **Visszatérés:** `str`
 

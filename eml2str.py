@@ -220,7 +220,7 @@ invalid_charrefs = {
     0x85: '\u2026',  # HORIZONTAL ELLIPSIS
     0x86: '\u2020',  # DAGGER
     0x87: '\u2021',  # DOUBLE DAGGER
-    0x88: '\u02c6',  # MODIFIER LETTER CIRCUMFLEX ACCENT
+    0x88: '\u20ac',  # EURO SIGN (cp1251 0x88; cp1252-ben ez a MODIFIER LETTER CIRCUMFLEX ACCENT U+02C6 lenne, de az onallo betukent nem fordul elo, cp1250-ben nincs 0x88)
     0x89: '\u2030',  # PER MILLE SIGN
     0x8a: '\u0160',  # LATIN CAPITAL LETTER S WITH CARON
     0x8b: '\u2039',  # SINGLE LEFT-POINTING ANGLE QUOTATION MARK
@@ -324,16 +324,18 @@ def mixed_decoder(unicode_error):
 
 codecs.register_error("mixed", mixed_decoder)
 
-def _mixed_factory(cs):
-    # mint a mixed, de a felso fel (A0..FF) a megadott kodlap szerint (latin2 / cp1250), a 80..9F marad az invalid_charrefs
-    tbl=bytes(range(0xa0,0x100)).decode(cs)
+def _mixed_factory(cs,lo=0xa0):
+    # mint a mixed, de a lo..FF byte-ok a megadott kodlap szerint: latin2 / cp1250-nel A0..FF (a 80..9F ott C1 vezerlo, marad az
+    # invalid_charrefs cp1252-irasjele), cp1251-nel 80..FF (ott a 80..9F is cirill betu: Ђ Љ Њ... es az irasjelek); a kodlapban
+    # nem definialt byte (cp1251 0x98) az invalid_charrefs szerint
+    tbl=bytes(range(lo,0x100)).decode(cs,"replace")
     def handler(e):
         cesu=cesu8_pair(e.object,e.start)
         if cesu: return cesu[0], e.start+cesu[1]
         b=e.object[e.start]
-        return (tbl[b-0xa0] if b>=0xa0 else invalid_charrefs.get(b,chr(b)), e.start+1)
+        return (tbl[b-lo] if b>=lo and tbl[b-lo]!="\ufffd" else invalid_charrefs.get(b,chr(b)), e.start+1)
     return handler
-for _cs in ("iso8859-2","cp1250"): codecs.register_error("mixed_"+_cs,_mixed_factory(_cs))
+for _cs,_lo in (("iso8859-2",0xa0),("cp1250",0xa0),("cp1251",0x80)): codecs.register_error("mixed_"+_cs,_mixed_factory(_cs,_lo))
 
 # 7 bites, shift-szekvencias kodlapok (a kanonikus codec-nev -> a shift-jelolo byte): ha a jelolo elo sem fordul az adatban,
 # a kodlap csak ASCII-t adhatna, tehat a 8 bites byte-ok mas kodlapbol jonnek (pl. iso-2022-jp fejlec, latin1 szoveg) ->
@@ -341,13 +343,34 @@ for _cs in ("iso8859-2","cp1250"): codecs.register_error("mixed_"+_cs,_mixed_fac
 _SHIFT_CODECS={'iso2022_jp':b'\x1b','iso2022_jp_1':b'\x1b','iso2022_jp_2':b'\x1b','iso2022_jp_2004':b'\x1b','iso2022_jp_3':b'\x1b',
     'iso2022_jp_ext':b'\x1b','iso2022_kr':b'\x1b','hz':b'~','utf-7':b'+'}  # a kanonikus nev 'utf-7' (nem utf_7)
 
-def safe_decode(data,cs,errors="mixed"):
+_HIGH_RE=re.compile(rb'[\xc0-\xff]+')
+def _cyrillic_like(data):
+    # cp1251 (cirill) szoveg-e: a C0-FF byte-ok (А-я) tobbsege 3+ hosszu futamban all (a cirill szavak), mig latin1/2 szovegben az
+    # ekezetes betuk elszigeteltek vagy parosak (año, Grüße, ção), ervenyes utf-8-ban pedig ket C0-FF byte nem allhat egymas
+    # mellett (a lead-et 80-BF folytato koveti). Rovid orosz targyra (egy szo) is igaz, latin szovegre gyakorlatilag soha.
+    highs=runs=0
+    for m in _HIGH_RE.finditer(data):
+        n=m.end()-m.start(); highs+=n
+        if n>=3: runs+=n
+    return highs>0 and runs*2>=highs
+
+def safe_decode(data,cs,errors="mixed",hint=None):
     # dekodolas a cs kodlappal; ha az nem letezik vagy nem hasznalhato (LookupError: unknown-8bit, iso-2022-cn, base64...,
     # UnicodeError: undefined, idna, ami a 'mixed'-et sem tamogatja), akkor utf-8 + mixed (latin1/cp1252 visszaesessel).
     # Latin1/2 kodlapnal, ha utf-8 magyar ekezetek vannak benne (is_utf8_mixed), hibaturo utf-8, ahol az ervenytelen
     # byte-ok a megadott kodlap szerint dekodolodnak (pl. levelezolista footer, idezett utf-8 resz)
+    # hint: a MIME-szintu (levelfejlecbeli) kodlap, ha a html <meta> felulirta utf-8-ra: az utf-8-kent ervenytelen byte-ok (pl. cp1251 resz
+    # az utf-8-nak jelolt html-ben) ilyenkor a MIME kodlap szerint dekodolodnak, nem latin1/cp1252-kent
     try:
         cs=codecs.lookup(cs or "utf-8").name
+        if hint and cs=="utf-8" and errors=="mixed":
+            try: hint=codecs.lookup(hint).name
+            except LookupError: hint=None
+            # csak ha a byte-ok tenyleg ilyen szovegnek latszanak: a MIME cimke gyakran hamis (windows-1251 cimkes, de latin1 spanyol level)
+            if hint=="cp1251" and _cyrillic_like(data): errors="mixed_cp1251"
+        # a cp1251 cimke onmagaban nem eleg (sok latin level jon tevesen windows-1251-kent): csak cirillnek latszo byte-okra hihetunk neki,
+        # kulonben utf-8 + latin1/cp1252 visszaeses, mint az ismeretlen kodlapoknal
+        if cs=="cp1251" and not _cyrillic_like(data): return data.decode("utf-8","mixed")
         if cs in _SHIFT_CODECS and _SHIFT_CODECS[cs] not in data: return data.decode("utf-8","mixed") # shift nelkul a kodlap nem ervenyes
         if cs in ["cp1252","iso8859-1","iso8859-2","cp1250"]: # latin1/2 kanonikus nevei (a charset_name utan a latin1/us-ascii mar cp1252)
             u=decode_utf8_cesu(data)  # gyakran utf-8 a latin1/2-nek jelolt szoveg (rovid fejlecekben is); CESU-8 parokkal is
@@ -365,6 +388,11 @@ def ascii_compatible(cs):
     except LookupError: return True
     except UnicodeError: return False
 
+# Az invalid_charrefs-t a 'mixed' hibakezelok (byte -> karakter, a dekoder altal hibasnak jelzett 0x80-0xFF byte-okra) es a
+# fix_chars() (kodpont -> csere a teljes dekodolt szovegen) is hasznalja. Az õ/Õ/û/Û -> ő/Ő/ű/Ű csere szandekosan feltetel
+# nelkul fut: a leveleink magyar / angol nyelvuek, es a magyar leveleket gyakran latin1/cp1252 kodlappal vagy latin1-es
+# betukeszlettel irt, utf-8-kent kuldott szoveggel kuldik, bennuk az õ/û az ő/ű helyett all. (A ritka portugal / francia / eszt
+# levelek valodi õ/û-je igy ő/ű lesz; nyelvdetektalassal probalkozni nem erdemes.)
 _FIX_TABLE=dict(invalid_charrefs)  # str.translate tabla: kodpont -> csere ('' = torles)
 
 _ACCENT_LETTERS="áéíóöőúüűÁÉÍÓÖŐÚÜŰäÄß"  # a magyar es a hianyzo nemet ekezetes betuk: ebbol epul az is_utf8_mixed() regexe (_ACCENT_U8) es a fix_mojibake() tablaja (_MOJI)
@@ -373,16 +401,34 @@ _ACCENT_LETTERS="áéíóöőúüűÁÉÍÓÖŐÚÜŰäÄß"  # a magyar es a hi
 # dekodolt utf-8): "Ã¡rvÃ­ztÅ±rÅ‘" -> "árvíztűrő", "â€™" -> "’". Csak egy szuk, biztonsagos celkeszletre: az ekezetes betuk
 # (_ACCENT_LETTERS) es nehany gyakori irasjel / szokoz (_MOJI_EXTRA, lasd lent); az altalanos (minden utf-8 sorozatra
 # kiterjedo) javitas tul kockazatos lenne, ezek a sorozatok viszont valodi szovegben nem fordulnak elo.
-# A celkarakter utf-8 byte-jainak alakjai kodlaponkent: latin1 (Ã/Å/â + nyers C1 vagy U+00A0-00BF), cp1252 (irasjelek: Å‘, â€™),
-# cp1250 (a kezdobyte is mas: Ăˇ, Ĺ‘), es a sajat mixed hibakezelo alakja (a folytatok az invalid_charrefs szerint); a kodlapban
-# nem definialt byte-u alakok kimaradnak. Ketszeres (dupla) mojibake is: az egyszeres alak ujra utf-8 -> kodlap korre (Ã¯Â¿Â½ -> U+FFFD).
-# irasjelek: ’ – — „ “ ” … • € ™ ® © · (Â©, â€™, â„¢, â‚¬...), a U+FFFD csere-karakter, a VS15/VS16 emoji-szelektorok (ï¸Ź; a translate
-# utana eldobja oket), a nbsp (Â + nbsp / Ã‚Â + nbsp szemet) es a tipografiai szokozok U+2000-200A, U+202F (â€‰, â€Š...; a nbsp-t
-# es a keskeny szokozoket a translate utana sima szokozre csereli)
-_MOJI_EXTRA="\u2019\u2013\u2014\u201e\u201c\u201d\u2026\u2022\u20ac\u2122\u00ae\u00a9\u00b7\ufffd\ufe0e\ufe0f\u00a0\u202f"+"".join(chr(c) for c in range(0x2000,0x200b))
+# A celkarakter utf-8 byte-jait a hibas dekodolas byte-onkent kepezi le, es egy szovegen belul is keveredhetnek a lekepezesek
+# (pl. html &#128; -> € a HTML5 tabla szerint, de &#157; -> nyers U+009D; vagy a kezdobyte cp1250 szerint Ă, a folytato nyers C1):
+# ezert az egyszeres alakok a byte-onkenti lehetosegek (latin1 chr(), cp1252, cp1250, invalid_charrefs) minden kombinacioja
+# (_moji_byte_alts, _moji_forms): Ã¡, Ăˇ, Å‘, Ĺ‘, â€™, â€\x99, Ă\x96... A dupla mojibake (az egyszeres alak ujra utf-8 -> kodlap
+# korre: Ã¯Â¿Â½ -> U+FFFD) csak egesz kodlapos alakokkal (latin1, cp1252, cp1250, mixed), kulonben robbanna a tabla.
+# irasjelek es jelek: a Latin-1 A1-BF blokk (¡ ¢ £ § ° ± « » ¿ © · ® ...: Â¢, Â£, Â«), a cp1252 irasjelei ’ ‘ ‚ – — „ “ ” ‹ › … • ‡ ‰
+# € ™ ˆ ˜ ƒ (â€™, â€ž, â„¢, â‚¬...; a † nincs koztuk: az alakja "â€" + nbsp/szokoz, ami csonka mojibake utan is all), a ❤ (âť¤), a U+FFFD csere-karakter, a VS15/VS16 emoji-szelektorok (ï¸Ź; a translate utana eldobja
+# oket), a nbsp (Â + nbsp / Ã‚Â + nbsp szemet) es a tipografiai szokozok U+2000-200A, U+202F (â€‰, â€Š...; a nbsp-t es a keskeny
+# szokozoket a translate utana sima szokozre csereli, a shy-t eldobja)
+_MOJI_EXTRA=("".join(chr(c) for c in range(0xa1,0xc0))+"\u2018\u2019\u201a\u2013\u2014\u201e\u201c\u201d\u2039\u203a\u2026\u2022\u2021\u2030"
+            "\u20ac\u2122\u02c6\u02dc\u0192\u2764\ufffd\ufe0e\ufe0f\u00a0\u202f"+"".join(chr(c) for c in range(0x2000,0x200b)))
 _MOJI={}
-def _moji_forms(b):
-    # egy utf-8 byte-sorozat lehetseges hibas dekodolasai (str-ek), ures ha a kodlapban nincs definialva valamelyik byte
+def _moji_byte_alts(x):
+    # egy byte lehetseges hibas leolvasasai: nyers latin1 (chr), cp1252, cp1250, invalid_charrefs (mixed hibakezelo / HTML5 &#N;)
+    alts={chr(x)}
+    for _cp in ("cp1252","cp1250"):
+        try: alts.add(bytes([x]).decode(_cp))
+        except UnicodeDecodeError: pass
+    _t=invalid_charrefs.get(x)
+    if _t and len(_t)==1: alts.add(_t)  # a nbsp (A0) itt sima szokoz: "Â " a mixed hibakezelo utan
+    return alts
+def _moji_forms(b,full=False):
+    # egy utf-8 byte-sorozat lehetseges hibas dekodolasai (str-ek): full=True a byte-onkenti alternativak minden kombinacioja,
+    # kulonben csak az egesz kodlapos alakok (ures, ha a kodlapban nincs definialva valamelyik byte) es a mixed hibakezelo alakja
+    if full:
+        out={""}
+        for x in b: out={t+a for t in out for a in _moji_byte_alts(x)}
+        return out
     out=set()
     for _cp in ("latin-1","cp1252","cp1250"):
         _t=b.decode(_cp,"ignore")
@@ -391,9 +437,11 @@ def _moji_forms(b):
     if len(_t)==len(b): out.add(_t)
     return out
 for _c in _ACCENT_LETTERS+_MOJI_EXTRA:
-    for _t in _moji_forms(_c.encode("utf-8")):
-        _MOJI[_t]=_c
-        for _t2 in _moji_forms(_t.encode("utf-8")): _MOJI[_t2]=_c  # dupla
+    for _t in _moji_forms(_c.encode("utf-8"),True):
+        _c2=_MOJI.get(_t,_c)
+        assert _c2==_c or (_c2.isspace() and _c.isspace()), (_t,_c,_c2)  # ket celkarakternek nem lehet kozos alakja, kiveve ket szokozt (U+2000 / U+2008: a 0x80 es a 0x88 is euro -> "â€€"): az elso (U+2000) marad
+        _MOJI[_t]=_c2
+        for _t2 in _moji_forms(_t.encode("utf-8")): _MOJI.setdefault(_t2,_c2)  # dupla (az egyszeres alak elsobbseget elvez)
 _MOJI_RE=re.compile("|".join(re.escape(k) for k in sorted(_MOJI,key=lambda k:(-len(k),k))))  # pontosan az ismert alakok, a hosszabb elobb
 _MOJI_LEADS={k[0] for k in _MOJI}  # az alakok elso karakterei a gyorsuthoz
 
@@ -665,6 +713,21 @@ def opacity_hidden(tag):  # csak akkor hivjuk, ha b'opacity:' in tag
     v=float(v)
     return (v/100 if pct else v)<0.5
 
+# apro betu (font-size <= 2px) szoveg: szinten rejtes a szurok ellen (<cite style="FONT-SIZE: 0">...). Az utolso font-size szamit;
+# a mertekegyseg px-re valtva (pt, pc, em, rem, %), egyseg nelkul csak a 0 szamit (a nem nulla egyseg nelkuli ertek ervenytelen
+# CSS, a bongeszo az alapmeretet hasznalja, tehat lathato), ismeretlen egyseg: lathato
+FONTSIZE_RE=re.compile(rb'font-size:([0-9]*\.?[0-9]+)([a-z%]*)')
+_FONTSIZE_PX={b'px':1.0,b'pt':4/3,b'pc':16.0,b'em':16.0,b'rem':16.0,b'%':0.16}
+
+def font_size_hidden(tag):  # csak akkor hivjuk, ha b'font-size:' in tag
+    m=FONTSIZE_RE.findall(tag)
+    if not m: return False
+    v,unit=m[-1]
+    v=float(v)
+    if not unit: return v==0
+    f=_FONTSIZE_PX.get(unit)
+    return f is not None and v*f<=2
+
 def html2text(data,debug=False,colors=None):
   warning=''
   indent=0
@@ -786,7 +849,7 @@ def html2text(data,debug=False,colors=None):
     hidden=False  # detect hidden text!
     if b'style' in tag: # detect hidden text!
         tag=tag.translate(None,b' \t\n\r\x0b\x0c')  # minden whitespace torlese: display : none, display:\tnone, es a sortoressel szettort stilus is
-        hidden= b'display:none' in tag or b'font-size:0p' in tag or b'font-size:1p' in tag or b'max-height:0p' in tag or b'mso-hide:all' in tag or (b'opacity:' in tag and opacity_hidden(tag))
+        hidden= b'display:none' in tag or (b'font-size:' in tag and font_size_hidden(tag)) or b'max-height:0p' in tag or b'mso-hide:all' in tag or (b'opacity:' in tag and opacity_hidden(tag))
 
     if debug:
       html+=[_c(ttag if in_block and ttag in colors else '_hidden' if hidden else '_text',_debug_shorten(data[q:p].rstrip()))+b'\n']
@@ -910,6 +973,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     for b,cs in BOMS:  # BOM eseten az donti el a kodlapot (mint a bongeszokben), magat a BOM-ot levagjuk
         if data.startswith(b): data=data[len(b):]; charset=cs; bom=True; break
 
+    mime_charset=charset  # a html <meta> felulirhatja (parse_htmlhead), a safe_decode-nak hintkent kell
     ldata=data.lower()
     if ctyp=="text/calendar" or ctyp=="application/ics":
         data=parse_ics(data)
@@ -945,7 +1009,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     # elobb strict utf-8 (gyakran utf-8 a szoveg mas charset cimkevel), ha nem az: a deklaralt kodlap mixed modban.
     # Nem ASCII-kompatibilis kodlapnal (utf-16/32, utf-7, iso-2022-jp, hz) nincs utf-8 proba, ott a 7 bites byte-sor tevesen atmenne
     u=decode_utf8_cesu(data) if ascii_compatible(charset) else None  # szigoru utf-8 (CESU-8 parokkal is)
-    data=u if u is not None else safe_decode(data,charset)  # latin1/2 + utf-8 keverek, ismeretlen kodlap: lasd safe_decode
+    data=u if u is not None else safe_decode(data,charset,hint=mime_charset)  # latin1/2 + utf-8 keverek, ismeretlen kodlap: lasd safe_decode
 
     # ezt mar a dekodolas utan kell :(
     if ctyp=="application/rtf":

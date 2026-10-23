@@ -323,8 +323,7 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
             // sortoressel szettort stilus is (a Postfix pl. 990 karakternel CRLF+szokozzel tordel: font-s\n ize:1px)
             let tag2: Vec<u8> = tag.iter().copied().filter(|&b| !is_bws(b)).collect();
             if contains(&tag2, b"display:none")
-                || contains(&tag2, b"font-size:0p")
-                || contains(&tag2, b"font-size:1p")
+                || font_size_hidden(&tag2)
                 || contains(&tag2, b"max-height:0p")
                 || contains(&tag2, b"mso-hide:all")
                 || opacity_hidden(&tag2)
@@ -410,6 +409,51 @@ fn opacity_hidden(tag: &[u8]) -> bool {
         i = end;
     }
     last.is_some_and(|v| v < 0.5)
+}
+
+/// eml2str.font_size_hidden(): az (utolso) `font-size:` erteke px-re valtva <= 2 (regex: `font-size:([0-9]*\.?[0-9]+)([a-z%]*)`);
+/// egyseg nelkul csak a 0, ismeretlen egyseg: lathato
+fn font_size_hidden(tag: &[u8]) -> bool {
+    let mut last: Option<(f64, &[u8])> = None;
+    let mut i = 0;
+    while let Some(p) = find(tag, b"font-size:", i) {
+        let s = p + 10;
+        i = s;
+        let mut e = s;
+        while e < tag.len() && tag[e].is_ascii_digit() {
+            e += 1;
+        }
+        let mut end = e;
+        if e < tag.len() && tag[e] == b'.' && e + 1 < tag.len() && tag[e + 1].is_ascii_digit() {
+            end = e + 1;
+            while end < tag.len() && tag[end].is_ascii_digit() {
+                end += 1;
+            }
+        } else if e == s {
+            continue; // nincs szam
+        }
+        let v: f64 = std::str::from_utf8(&tag[s..end]).unwrap().parse().unwrap();
+        let mut u = end;
+        while u < tag.len() && (tag[u].is_ascii_lowercase() || tag[u] == b'%') {
+            u += 1;
+        }
+        last = Some((v, &tag[end..u]));
+        i = u;
+    }
+    match last {
+        None => false,
+        Some((v, b"")) => v == 0.0,
+        Some((v, unit)) => {
+            let f = match unit {
+                b"px" => 1.0,
+                b"pt" => 4.0 / 3.0,
+                b"pc" | b"em" | b"rem" => 16.0,
+                b"%" => 0.16,
+                _ => return false,
+            };
+            v * f <= 2.0
+        }
+    }
 }
 
 /// bytes.replace(a, b)

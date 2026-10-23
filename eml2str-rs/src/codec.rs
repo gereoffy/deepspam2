@@ -43,8 +43,8 @@ pub struct Codec {
 pub enum Errors {
     /// eml2str.mixed_decoder: a hibas byte -> invalid_charrefs / latin1
     Mixed,
-    /// mixed_iso8859-2 / mixed_cp1250: a felso fel (A0..FF) a megadott kodlap szerint
-    MixedCs(&'static [char; 96]),
+    /// mixed_iso8859-2 / mixed_cp1250 / mixed_cp1251: a lo..FF byte-ok a megadott kodlap szerint (kodpontok, 0xFFFE = nem definialt)
+    MixedCs(&'static [u32], u8),
     Ignore,
 }
 
@@ -58,11 +58,13 @@ struct Registry {
     modules: HashMap<&'static str, u16>,
     custom: HashMap<&'static str, u16>,
     overrides: HashMap<&'static str, &'static str>,
+    /// invalid_charrefs: a mixed hibakezelokhoz (byte -> karakter) es a fix_chars-hoz (kodpont -> csere), 0x100 alatt
     charrefs: [Option<&'static str>; 256],
-    /// az invalid_charrefs 0x100 feletti bejegyzesei (lathatatlan karakterek): csak a fix_chars hasznalja
+    /// az invalid_charrefs 0x100 feletti bejegyzesei (lathatatlan karakterek stb.): csak a fix_chars hasznalja
     charrefs_hi: HashMap<u32, &'static str>,
-    latin2_hi: [char; 96],
-    cp1250_hi: [char; 96],
+    latin2_hi: [u32; 96],
+    cp1250_hi: [u32; 96],
+    cp1251_hi: [u32; 128],
 }
 
 fn registry() -> &'static Registry {
@@ -81,17 +83,20 @@ fn registry() -> &'static Registry {
                 charrefs_hi.insert(k, v);
             }
         }
-        let hi = |name: &str| -> [char; 96] {
+        let hi = |name: &str, out: &mut [u32]| {
             let c = codecs.iter().find(|c| c.name == name).expect(name);
             let Kind::Charmap(t) = c.kind else { panic!("{name}") };
-            let mut out = ['\0'; 96];
+            let lo = 0x100 - out.len();
             for (i, o) in out.iter_mut().enumerate() {
-                *o = char::from_u32(tables::CHARMAPS[t][0xa0 + i]).unwrap();
+                *o = tables::CHARMAPS[t][lo + i];
             }
-            out
         };
-        let latin2_hi = hi("iso8859-2");
-        let cp1250_hi = hi("cp1250");
+        let mut latin2_hi = [0u32; 96];
+        let mut cp1250_hi = [0u32; 96];
+        let mut cp1251_hi = [0u32; 128];
+        hi("iso8859-2", &mut latin2_hi);
+        hi("cp1250", &mut cp1250_hi);
+        hi("cp1251", &mut cp1251_hi);
         Registry {
             aliases: tables::ALIASES.iter().copied().collect(),
             modules: tables::MODULES.iter().copied().collect(),
@@ -102,6 +107,7 @@ fn registry() -> &'static Registry {
             charrefs_hi,
             latin2_hi,
             cp1250_hi,
+            cp1251_hi,
         }
     })
 }
@@ -157,7 +163,7 @@ pub(crate) fn handler_push(out: &mut String, b: u8, errors: Errors) {
     let r = registry();
     match errors {
         Errors::Ignore => {}
-        Errors::MixedCs(tbl) if b >= 0xa0 => out.push(tbl[(b - 0xa0) as usize]),
+        Errors::MixedCs(tbl, lo) if b >= lo && tbl[(b - lo) as usize] != 0xfffe => push_cp(out, tbl[(b - lo) as usize]),
         _ => match r.charrefs[b as usize] {
             Some(s) => out.push_str(s),
             None => out.push(b as char),
@@ -166,10 +172,31 @@ pub(crate) fn handler_push(out: &mut String, b: u8, errors: Errors) {
 }
 
 pub fn mixed_latin2() -> Errors {
-    Errors::MixedCs(&registry().latin2_hi)
+    Errors::MixedCs(&registry().latin2_hi, 0xa0)
 }
 pub fn mixed_cp1250() -> Errors {
-    Errors::MixedCs(&registry().cp1250_hi)
+    Errors::MixedCs(&registry().cp1250_hi, 0xa0)
+}
+pub fn mixed_cp1251() -> Errors {
+    Errors::MixedCs(&registry().cp1251_hi, 0x80)
+}
+
+/// eml2str._cyrillic_like(): a C0-FF byte-ok tobbsege 3+ hosszu futamban all (cp1251 cirill szavak); latin szovegben az ekezetek
+/// elszigeteltek vagy parosak, ervenyes utf-8-ban ket C0-FF byte nem allhat egymas mellett
+fn cyrillic_like(data: &[u8]) -> bool {
+    let (mut highs, mut runs, mut run) = (0usize, 0usize, 0usize);
+    for &b in data.iter().chain(std::iter::once(&0u8)) {
+        if b >= 0xc0 {
+            run += 1;
+        } else {
+            highs += run;
+            if run >= 3 {
+                runs += run;
+            }
+            run = 0;
+        }
+    }
+    highs > 0 && runs * 2 >= highs
 }
 
 /// eml2str.cesu8_pair(): CESU-8 / WTF-8 surrogate-par (ED A0..AF xx ED B0..BF xx) a pos-tol -> a teljes karakter (6 byte)
@@ -459,12 +486,24 @@ pub fn is_utf8_mixed(data: &[u8], n: usize) -> bool {
 }
 
 /// eml2str.safe_decode()
-pub fn safe_decode(data: &[u8], cs: Option<&str>, errors: Errors) -> String {
+/// hint: a MIME-szintu kodlap, ha a html <meta> utf-8-ra irta felul: cp1251 hint + cirillnek latszo byte-ok eseten az utf-8-kent
+/// ervenytelen byte-ok cp1251 szerint dekodolodnak (mixed_cp1251), nem latin1/cp1252-kent
+pub fn safe_decode(data: &[u8], cs: Option<&str>, errors: Errors, hint: Option<&str>) -> String {
     let name = match cs {
         Some(s) if !s.is_empty() => s,
         _ => "utf-8",
     };
     let Some(codec) = lookup(name) else { return decode_utf8(data, Errors::Mixed) };
+    let mut errors = errors;
+    if let Some(h) = hint {
+        if codec.name == "utf-8" && matches!(errors, Errors::Mixed) && lookup(h).map_or(false, |c| c.name == "cp1251") && cyrillic_like(data) {
+            errors = mixed_cp1251();
+        }
+    }
+    // a cp1251 cimke onmagaban nem eleg (sok latin level jon tevesen windows-1251-kent): csak cirillnek latszo byte-okra hiszunk neki
+    if codec.name == "cp1251" && !cyrillic_like(data) {
+        return decode_utf8(data, Errors::Mixed);
+    }
     // 7 bites, shift-szekvencias kodlap (eml2str._SHIFT_CODECS), de a shift-jelolo elo sem fordul: a kodlap csak ASCII-t adhatna,
     // a 8 bites byte-ok mas kodlapbol jonnek -> utf-8 + mixed visszaeses (iso2022_kr es hz: Unsupported, az amugy is visszaesik)
     let shift = match codec.kind {

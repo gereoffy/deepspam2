@@ -128,7 +128,7 @@ Nem portolt, mert az `eml2str()` nem használja: `get_mimedata`, `readfolder`, `
 
 A charset-kezelés a Python `codecs` viselkedését követi. Ezt a fordításkor generált `tables.rs` biztosítja:
 codec-névfeloldás (`codecs.lookup` + az `eml2str` saját aliasai és felülírásai), a Python egybájtos kódtáblái,
-HTML5-entitások, `invalid_charrefs`, a mojibake-alakok (`MOJI`, a `fix_chars` előtti `fix_mojibake`-hez), és a Unicode decimális számjegy-blokkok (`ND_ZEROS`, a `unicodedata`-ból): az RTF
+HTML5-entitások, `invalid_charrefs`, a mojibake-alakok (`MOJI`, 947 alak a Python `_MOJI`-ból, a `fix_chars` előtti `fix_mojibake`-hez), és a Unicode decimális számjegy-blokkok (`ND_ZEROS`, a `unicodedata`-ból): az RTF
 `\uN`, `\ucN`, `\binN`, `\fN`, `\fcharsetN` argumentumában a Python `re` `\d`-je és az `int()` minden Nd számjegyet
 elfogad, a Rust ugyanezt a táblát használja. A utf-7 dekóder a CPython C-kódját követi, a CJK kódlapokat az
 encoding_rs dekódolja.
@@ -141,7 +141,7 @@ encoding_rs dekódolja.
 | `src/mime.rs` | `parse_eml()`, `parse_ctyp()`, `decode_body()`, a `binascii` `a2b_base64` / `a2b_qp` pontos megfelelője |
 | `src/html.rs` | `html2text()`, `html.unescape()` (Python stdlib), `parse_htmlhead()` (az URL-kinyerés nincs portolva: a Python csak a debug kimenetbe teszi) |
 | `src/rtf.rs` | `parse_rtfhead()`, a tartalék RTF-kinyerő (a legkülső `}` után vége, tartományon kívüli `\uN` → U+FFFD, johab fallback), `fix_surrogates()` |
-| `src/codec.rs` | `codecs.lookup`, `safe_decode()`, `ascii_compatible()`, a `mixed` hibakezelők (CESU-8 párokkal, `handler_at`), `decode_utf8_cesu()`, UTF-8/16/32, egybájtos kódlapok |
+| `src/codec.rs` | `codecs.lookup`, `safe_decode()` (a `hint` és a cp1251 → `cyrillic_like()` ellenőrzés is), `ascii_compatible()`, a `mixed` hibakezelők (CESU-8 párokkal, `handler_at`), `decode_utf8_cesu()`, UTF-8/16/32, egybájtos kódlapok |
 | `src/utf7.rs` | utf-7 dekóder |
 | `src/python.rs` | a Python-modul (`eml2str_rs`, a `python` feature-rel) |
 | `build.rs`, `gen_tables.py` | a codec-, entitás- és Unicode-számjegy táblák generálása fordításkor |

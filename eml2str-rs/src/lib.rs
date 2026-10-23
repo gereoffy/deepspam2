@@ -85,6 +85,7 @@ pub fn decode_payload(data: &[u8], ctyp: &str, charset: Option<&str>) -> Result<
             break;
         }
     }
+    let mime_charset = charset.clone(); // a html <meta> felulirhatja (parse_htmlhead), a safe_decode-nak hintkent kell
     let owned: Vec<u8>;
     let ldata = blower(data);
     if ctyp == "text/calendar" || ctyp == "application/ics" {
@@ -113,7 +114,7 @@ pub fn decode_payload(data: &[u8], ctyp: &str, charset: Option<&str>) -> Result<
                 return Err(PyErr("ValueError")); // codec-nevben NUL: "embedded null character"
             }
             if !ascii_compatible(&csn) {
-                conv = Some(safe_decode(data, Some(&csn), Errors::Mixed).into_bytes()); // mixed: a kosza 8 bites byte-ok megmaradnak
+                conv = Some(safe_decode(data, Some(&csn), Errors::Mixed, None).into_bytes()); // mixed: a kosza 8 bites byte-ok megmaradnak
                 charset = Some("utf-8".to_string());
             }
         }
@@ -133,7 +134,7 @@ pub fn decode_payload(data: &[u8], ctyp: &str, charset: Option<&str>) -> Result<
     // szigoru utf-8 (CESU-8 surrogate-parokkal is), ha nem megy: safe_decode (latin1/2 + utf-8 keverek, ismeretlen kodlap...)
     let text = match if ascii_compatible(&charset) { codec::decode_utf8_cesu(data) } else { None } {
         Some(s) => s,
-        None => safe_decode(data, Some(&charset), Errors::Mixed),
+        None => safe_decode(data, Some(&charset), Errors::Mixed, mime_charset.as_deref()), // hint: a MIME kodlap (a <meta> felulirhatta)
     };
 
     let text = if is_rtf { rtf::rtf_to_text(&text, &rtf::rtf_hex_encoding(&charset))? } else { html::unescape(&text) };
@@ -193,7 +194,7 @@ pub fn hdrdecode4(h: &[u8]) -> Result<String, PyErr> {
                 if csn.contains('\0') {
                     return Err(PyErr("ValueError"));
                 }
-                out.push_str(&safe_decode(&b, Some(&csn), Errors::Mixed))
+                out.push_str(&safe_decode(&b, Some(&csn), Errors::Mixed, None))
             }
         }
     }

@@ -107,7 +107,7 @@ import html as H
 o.write('pub static HTML_INVALID_CHARREFS: &[(u32, &str)] = &[\n')
 for k in sorted(H._invalid_charrefs): o.write('    (%d, %s),\n' % (k, rs(H._invalid_charrefs[k])))
 o.write('];\n\npub static HTML_INVALID_CODEPOINTS: &[u32] = &[%s];\n\n' % ','.join(str(c) for c in sorted(H._invalid_codepoints)))
-o.write('pub static INVALID_CHARREFS: &[(u32, &str)] = &[  // eml2str.invalid_charrefs\n')
+o.write('pub static INVALID_CHARREFS: &[(u32, &str)] = &[  // eml2str.invalid_charrefs: a mixed hibakezelokhoz (byte) es a fix_chars-hoz (kodpont)\n')
 for k in sorted(eml2str.invalid_charrefs): o.write('    (%d, %s),\n' % (k, rs(eml2str.invalid_charrefs[k])))
 o.write('];\n\n/// eml2str._MOJI: hibasan dekodolt alak -> celkarakter (a hosszabb alakok elobb)\npub static MOJI: &[(&str, char)] = &[\n')
 for k in sorted(eml2str._MOJI, key=lambda k: (-len(k), k)): o.write("    (%s, '\\u{%x}'),\n" % (rs(k), ord(eml2str._MOJI[k])))
