@@ -1363,7 +1363,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
                 first=False
             elif data[p:p+4]!=b'_alt': print("BoundarySkip:",q,pp,p,data[pp:p],data[p:p+10])
 
-    elif level<MAX_MIME_DEPTH and ctyp.startswith('message/'):
+    elif level<MAX_MIME_DEPTH and ctyp.startswith('message/') and cenc not in ('base64','quoted-printable'):
         # message/disposition-notification
         # message/rfc822
         pe=parse_eml(data,debug,decode,level+1,p=hsize,pend=pend)
