@@ -384,6 +384,8 @@ iCalendar (`.ics`) tartalomból kiszedi a leírást.
 - `data`: `bytes`
 - **Visszatérés:** `bytes` – az első `DESCRIPTION*` mező (escape-ek feloldva), vagy ha előbb
   `X-ALT-DESC;FMTTYPE=text/html` jön, annak `html2text()` változata; ha egyik sincs, `b''`.
+- Az escape-ek (`\\`, `\n` / `\N`, `\,`, `\;`) feloldása egy menetben történik: a `\\n` így
+  szó szerinti `\n` marad, nem válik sortöréssé.
 
 ### `parse_docx(data)`
 Word `.docx` (ZIP) fájlból a `word/document.xml` szövegét veszi ki (`w:t` elemek; `w:p`, `w:br`,

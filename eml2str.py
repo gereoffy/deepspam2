@@ -943,12 +943,8 @@ def parse_ics(data):
     if hdr: ics.append(hdr.split(b':',1))
 
     def unescape(text):
-        return text.replace(b'\\N', b'\\n')\
-                   .replace(b'\r\n', b'\n')\
-                   .replace(b'\\n', b'\n')\
-                   .replace(b'\\,', b',')\
-                   .replace(b'\\;', b';')\
-                   .replace(b'\\\\', b'\\')
+        # Egy menet: a feloldott backslash mar ne nyisson ujabb escape-et.
+        return re.sub(rb'\\([\\,;nN])', lambda m: b'\n' if m[1] in (b'n',b'N') else m[1], text.replace(b'\r\n', b'\n'))
 
     for x in ics:
 #        print(x)
