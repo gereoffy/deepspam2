@@ -12,7 +12,7 @@ ami a hibás/"törött" leveleket is feldolgozza.
 
 | Modul | Flag | Mire kell |
 |---|---|---|
-| `striprtf.rtf_to_text` | `rtf_support` | `application/rtf` részek és TNEF-ben lévő RTF body szöveggé alakítása. Ha nincs telepítve, vagy kivételt dob, a beépített `rtf_fallback_text()` dolgozik helyette (`rtf_to_text_safe()`), így az RTF részek striprtf nélkül is feldolgozódnak (az `rtf_support` flaget csak a `rtf_to_text_safe()` nézi). |
+| `striprtf.rtf_to_text` | `rtf_support` | `application/rtf` / `text/rtf` részek és TNEF-ben lévő RTF body szöveggé alakítása. Ha nincs telepítve, vagy kivételt dob, a beépített `rtf_fallback_text()` dolgozik helyette (`rtf_to_text_safe()`), így az RTF részek striprtf nélkül is feldolgozódnak (az `rtf_support` flaget csak a `rtf_to_text_safe()` nézi). |
 | `tnef_mini.parse_tnef_body` | `tnef_support` | `application/ms-tnef` (Outlook `winmail.dat`) részek feldolgozása |
 
 Ha az import nem sikerül, a flag `False`. A TNEF részeket ekkor az `eml2str()` / `get_mimedata()` kihagyja,
@@ -114,6 +114,8 @@ HTML / XML résznél a payload blokk a `html2text(debug=True)` által "prettify"
 
 ### `parse_eml(data, debug=False, decode=False, level=0, p=0, pend=-1)`
 Saját, rekurzív MIME parser. A `data`-t nem másolja, csak pozíciókkal (`p`, `pend`) dolgozik.
+A `base64` vagy `quoted-printable` kódolású `message/*` részeket nem bontja tovább: levélként (leaf part)
+kezeli őket, a többi leaf részhez hasonló payload-kezeléssel. Az `eml2str()` ezeket a nem szöveges részeket kihagyja.
 
 | Paraméter | Típus | Leírás |
 |---|---|---|
@@ -153,8 +155,9 @@ A `parse_eml(decode='lazy')` által adott rész transfer-decoded törzse.
   tárolja; `decode=True`-val épített részeknél a meglévő `"payload"`-ot adja.
 
 ### `header_end(data, p, pend)`
-A fejléc vége a `data[p:pend]`-ben: `min(find(b'\n\n')+2, find(b'\r\n\r\n')+4)`, egyetlen menetben (a sorvégeken
-lépkedve). Ha nincs üres sor: `pend`.
+A fejléc vége a `data[p:pend]`-ben, egyetlen menetben (a sorvégeken lépkedve).
+Üres fejlécszakasznál a kezdő LF vagy CRLF után (`p+1`, illetve `p+2`); egyébként az első
+`\n\n` vagy `\r\n\r\n` után. Ha nincs üres sor: `pend`. A visszaadott pozíció abszolút, nem `p`-hez viszonyított.
 
 - **Visszatérés:** `tuple[int, bytes]` = `(hsize, newline)`, ahol `newline` `b'\n'` vagy `b'\r\n'`.
 
@@ -207,7 +210,7 @@ Lépések:
    nem ASCII-kompatibilis kódlapnál (`ascii_compatible()`: iso-2022-*, utf-16/32, utf-7, hz) előzetes dekódolás
    UTF-8-ra (`safe_decode()`, `mixed` hibakezelővel, hogy a kósza 8 bites bájtok megmaradjanak), majd `html2text()`.
 2. Charset feloldás: alapértelmezés `iso8859-1`, felülírások a `charset_name()` szerint (az aliasokat a codec-kereső kezeli).
-   `application/rtf` esetén az RTF saját `\ansicpg`-je elsőbbséget kap (`parse_rtfhead()`).
+   `application/rtf` és `text/rtf` esetén az RTF saját `\ansicpg`-je elsőbbséget kap (`parse_rtfhead()`).
 3. Dekódolás: ASCII-kompatibilis kódlapnál előbb szigorú UTF-8 (gyakran UTF-8 a más charsettel jelölt szöveg),
    ha ez nem sikerül, vagy a kódlap nem ASCII-kompatibilis: `safe_decode()` (a deklarált kódlap `"mixed"`
    hibakezelővel; latin1/2-nél UTF-8 + `mixed_*`, ha UTF-8 ékezetek vannak benne; ismeretlen codec: UTF-8 `"mixed"`).
@@ -243,9 +246,11 @@ Saját, gyors, toleráns HTML → szöveg konverter (bájt szinten dolgozik, a k
 **Visszatérés:**
 - `debug=False`: `bytes` – a szöveg.
 - `debug=True`: `tuple[bytes, list[bytes]]` = `(text, html_lines)`.
-- Ha a bemenetben nincs `<`: változatlanul adja vissza (`debug` esetén `(data, [data])`).
+- Ha a bemenetben nincs felismerhető tagkezdet: változatlanul adja vissza (`debug` esetén `(data, [data])`).
 
 Jellemzők:
+- Az első tag keresésekor is csak a `/`, `!`, `?` vagy ASCII betű által követett `<` számít tagkezdetnek;
+  például a `2 < 3` összehasonlítás szövegként megmarad.
 - A tag vége a HTML5 tokenizer szerint (`TAG_END_RE`, PyPy alatt és `debug` módban ugyanez bájtonként):
   - whitespace: tab, LF, FF, CR, szóköz;
   - a tag neve és az attribútumok neve whitespace-ig, `/`-ig vagy `>`-ig tart, a bennük lévő `=` és idézőjel nem
@@ -350,6 +355,7 @@ kimaradnak, azokra a dokumentum kódlapja érvényes).
 
 ### `parse_htmlhead(data, charset=None)`
 A HTML `<head>` részből kiszedi a `<meta ... charset=...>` értéket.
+A `charset` és az `=` közötti whitespace-t is elfogadja (pl. `<meta charset = "windows-1250">`).
 
 - `data`: `bytes` (a `<body` előtti rész), `charset`: `str | None` – alapérték, ha nincs meta.
 - **Visszatérés:** `str | None` – kisbetűs charset név (vagy a bemenő alapérték).
