@@ -971,7 +971,7 @@ def parse_docx(data):   # if ctyp=="application/vnd.openxmlformats-officedocumen
                 continue
             if tag1==b'w:t':
                 s+=txt
-            elif tag1 in [b'w:tab',b'w:br',b'w:cr',b'w:p']:
+            elif tag1.rstrip(b'/') in [b'w:tab',b'w:br',b'w:cr',b'w:p']:
                 s+=b'\n'
         return s
     except Exception as e:

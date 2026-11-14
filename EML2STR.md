@@ -387,7 +387,7 @@ iCalendar (`.ics`) tartalomból kiszedi a leírást.
 
 ### `parse_docx(data)`
 Word `.docx` (ZIP) fájlból a `word/document.xml` szövegét veszi ki (`w:t` elemek; `w:p`, `w:br`,
-`w:tab`, `w:cr` → újsor).
+`w:tab`, `w:cr` → újsor). Az önzáró alakokat is felismeri, szóközzel és anélkül (`<w:br />`, `<w:br/>`).
 
 - `data`: `bytes`
 - **Visszatérés:** `bytes` (UTF-8); hiba esetén a kivétel `repr()`-je bájtként.
