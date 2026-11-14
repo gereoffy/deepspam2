@@ -1,0 +1,18 @@
+[package]
+name = "deepspam-milter"
+version = "0.1.0"
+edition = "2021"
+description = "Native Rust DeepSpam CPU milter"
+
+[[bin]]
+name = "deepspam4"
+path = "src/main.rs"
+
+[dependencies]
+deepspam-model = { path = "../model-rs" }
+eml2str = { path = "../eml2str-rs", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "signal", "macros"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

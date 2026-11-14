@@ -1,0 +1,15 @@
+[package]
+name = "deepspam-model"
+version = "0.1.0"
+edition = "2021"
+description = "DeepSpam text preprocessing, SentencePiece and CPU CNN inference"
+
+[dependencies]
+ndarray = "0.17.2"
+ndarray-npy = { version = "0.10.0", default-features = false, features = ["npz"] }
+sentencepiece-rust = "=0.1.1"
+unicode-normalization = "0.1.26"
+
+[profile.release]
+lto = true
+codegen-units = 1
