@@ -1238,10 +1238,12 @@ def decode_body(data,encoding,binary=True):
 
 
 def header_end(data,p,pend):
-    # a fejlec vege: min(find(b'\n\n')+2, find(b'\r\n\r\n')+4) a data[p:pend]-ben, kulonben pend.
+    # a fejlec vege (abszolut pozicio): az elso ures sor utan, kulonben pend.
     # Egy menetben, a sorvegeken lepkedve: a ket kulon find() CRLF-es levelnel (ahol nincs \n\n) a resz vegeig
     # keresett, minden MIME-resznel ujra.
     i=data.find(b'\n',p,pend)
+    if i==p: return i+1,b'\n'  # ures fejlec: az elso sor mar az elvalaszto
+    if i==p+1 and data[p]==13: return i+1,b'\r\n'
     while i>=0:
         if i+1<pend and data[i+1]==10: return i+2,b'\n'
         if i>p and data[i-1]==13 and i+2<pend and data[i+1]==13 and data[i+2]==10: return i+3,b'\r\n'
