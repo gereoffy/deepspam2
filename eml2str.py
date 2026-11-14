@@ -407,8 +407,9 @@ _ACCENT_LETTERS="áéíóöőúüűÁÉÍÓÖŐÚÜŰäÄß"  # a magyar es a hi
 # (_moji_byte_alts, _moji_forms): Ã¡, Ăˇ, Å‘, Ĺ‘, â€™, â€\x99, Ă\x96... A dupla mojibake (az egyszeres alak ujra utf-8 -> kodlap
 # korre: Ã¯Â¿Â½ -> U+FFFD) csak egesz kodlapos alakokkal (latin1, cp1252, cp1250, mixed), kulonben robbanna a tabla.
 # irasjelek es jelek: a Latin-1 A1-BF blokk (¡ ¢ £ § ° ± « » ¿ © · ® ...: Â¢, Â£, Â«), a cp1252 irasjelei ’ ‘ ‚ – — „ “ ” ‹ › … • ‡ ‰
-# € ™ ˆ ˜ ƒ (â€™, â€ž, â„¢, â‚¬...; a † nincs koztuk: az alakja "â€" + nbsp/szokoz, ami csonka mojibake utan is all), a ❤ (âť¤), a U+FFFD csere-karakter, a VS15/VS16 emoji-szelektorok (ï¸Ź; a translate utana eldobja
-# oket), a nbsp (Â + nbsp / Ã‚Â + nbsp szemet) es a tipografiai szokozok U+2000-200A, U+202F (â€‰, â€Š...; a nbsp-t es a keskeny
+# € ™ ˆ ˜ ƒ (â€™, â€ž, â„¢, â‚¬...; a † nincs koztuk: az alakja "â€" + nbsp/szokoz, ami csonka mojibake utan is all), a ❤ (âť¤),
+# a U+FFFD csere-karakter, a VS15/VS16 emoji-szelektorok (ï¸Ź; a translate utana eldobja oket),
+# a nbsp (Â + nbsp / Ã‚Â + nbsp szemet) es a tipografiai szokozok U+2000-200A, U+202F (â€‰, â€Š...; a nbsp-t es a keskeny
 # szokozoket a translate utana sima szokozre csereli, a shy-t eldobja)
 _MOJI_EXTRA=("".join(chr(c) for c in range(0xa1,0xc0))+"\u2018\u2019\u201a\u2013\u2014\u201e\u201c\u201d\u2039\u203a\u2026\u2022\u2021\u2030"
             "\u20ac\u2122\u02c6\u02dc\u0192\u2764\ufffd\ufe0e\ufe0f\u00a0\u202f"+"".join(chr(c) for c in range(0x2000,0x200b)))
@@ -694,6 +695,7 @@ TAG_END_RE=re.compile(rb'''
 
 # soron beluli (phrasing) tagek, amik nem torik meg a szot (a html2text nem tesz szokozt a helyukre): szovegszintu jelolok,
 # sub/sup, a nulla szelessegu wbr, a (gyakran 1px-es, szo kozepebe szurt) img, es a kommentek / <?..?> ('!', '?')
+PRE_TAGS={'pre','textarea','listing','xmp'}  # whitespace-megorzo elemek: bennuk a sorveg sortores (DSN "Original message headers" <pre> blokk)
 INLINE_TAGS={'wbr','span','a','b','i','u','em','strong','abbr','font','s','strike','small','big','tt','sub','sup','code','kbd',
     'samp','var','cite','q','dfn','mark','ins','del','bdi','bdo','time','data','label','nobr','acronym','blink','img','!','?'}
 
@@ -752,6 +754,7 @@ def html2text(data,debug=False,colors=None):
       return (data,[_c('_text',data)]) if debug else data
   text=[data[:p]] if p>0 else []  # initial text before 1st tag
   tlen=0 #len(data[:p].strip())
+  pre=False  # <pre> (PRE_TAGS) belsejeben vagyunk
 
   if debug:
       if colors: html=[reset]
@@ -809,6 +812,7 @@ def html2text(data,debug=False,colors=None):
     tag=rawtag.lower()
     tt,ttag=tag_type(tag)     # tag type,name
     in_block= tt>0 and ttag in ['style','script','title','svg','annotation']   # TODO FIXME: svg kell ide?
+    if ttag in PRE_TAGS: pre=tt>0
 #    print("TAG:",p,q,tt,ttag,tag) # debug
 
     # URL kinyerese nyito/selfclosing tagekbol (zaro tag-nek nincs attributuma)
@@ -879,6 +883,9 @@ def html2text(data,debug=False,colors=None):
         # inline (phrasing) elemek es a kommentek nem torik meg a szot: vi<!-- x -->agra = viagra, acco<wbr>unt, acco<img src=1px>unt,
         # x<sup>2</sup>; minden mas tag (blokkok, listaelemek, cellak, form-vezerlok, ruby rt/rp...) szokozt tesz
         if not ttag in INLINE_TAGS: text+=[b' ']
+    if pre:  # a sorvegek sortoresek; a nyito tag utani elso sorveg a HTML szerint nem szamit
+        if tt>0 and ttag in PRE_TAGS: txt=txt[2:] if txt[:2]==b'\r\n' else txt[1:] if txt[:1]==b'\n' else txt
+        txt=txt.replace(b'\n',b'<BR>')
     text+=[txt]
     tlen+=len(txt.strip())
 

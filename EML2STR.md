@@ -39,6 +39,7 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `_ACCENT_U8` | `re.Pattern` | A `_ACCENT_LETTERS` UTF-8 bájtpárjai (kezdőbájtonként csoportosítva) az `is_utf8_mixed()`-hez. |
 | `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_font_re`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, a fonttábla `\fN` bejegyzéseit kereső regex (`rtf_font_codepages()`), és a nevesített írásjelek / szimbólumok leképezése. |
 | `INLINE_TAGS` | `set[str]` | A `html2text()` soron belüli tagjei, amik nem törik meg a szót (nem kerül szóköz a helyükre); lásd ott. |
+| `PRE_TAGS` | `set[str]` | A `html2text()` whitespace-megőrző elemei (`pre`, `textarea`, `listing`, `xmp`): bennük a sorvég sortörés; lásd ott. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
 | `TAG_END_RE` | `re.Pattern` | A tag végének keresése a HTML5 tokenizer szerint (lásd `html2text()`). |
 | `TAG_END_USE_RE` | `bool` | `True` CPythonban: a `html2text()` a `TAG_END_RE`-t használja. PyPy alatt `False`: ott ugyanez bájtonkénti ciklussal fut, mert a JIT-elt ciklus a gyorsabb. |
@@ -263,7 +264,9 @@ Jellemzők:
   `mso-hide:all`, `opacity` 0.5 alatt (`opacity_hidden()`). A tag utáni szöveg (a következő tagig) kimarad;
   kivétel a levél eleji (még szöveg előtti) rejtett "preheader", ami `[...]` közé téve bekerül.
   MS Teams `signedadaptivecard` rejtett base64 adat kihagyva.
-- `div`, `p`, `br`, `tr` → sortörés; a soron belüli (phrasing) elemek (`INLINE_TAGS`: `span`, `a`, `b`, `i`, `u`, `em`, `strong`,
+- `div`, `p`, `br`, `tr` → sortörés; a whitespace-megőrző elemek (`PRE_TAGS`: `pre`, `textarea`, `listing`, `xmp`) belsejében a
+  sorvégek is sortörések (a nyitó tag utáni első sorvég a HTML szerint nem számít), így pl. a DSN levelek `<pre>`-be írt eredeti
+  fejlécei nem folynak egybe; a soron belüli (phrasing) elemek (`INLINE_TAGS`: `span`, `a`, `b`, `i`, `u`, `em`, `strong`,
   `abbr`, `font`, `s`, `strike`, `small`, `big`, `tt`, `sub`, `sup`, `code`, `kbd`, `samp`, `var`, `cite`, `q`, `dfn`, `mark`, `ins`,
   `del`, `bdi`, `bdo`, `time`, `data`, `label`, `nobr`, `acronym`, `blink`, a nulla szélességű `wbr` és az `img`) és a kommentek
   (`<!--…-->`, `<!…>`, `<?…>`) nem tesznek szóközt (`vi<!-- x -->agra` → `viagra`, `acco<wbr>unt` → `account`,

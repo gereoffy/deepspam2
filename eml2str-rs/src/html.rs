@@ -258,6 +258,7 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
     text.extend_from_slice(&data[..p]);
     let mut tlen = 0usize;
     let mut tagbuf: Vec<u8> = Vec::new();
+    let mut pre = false; // <pre> (eml2str.PRE_TAGS) belsejeben vagyunk
 
     while p < n {
         let mut q = p + 1;
@@ -278,6 +279,10 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
         let (tt, ttag) = tag_type(tag);
         let ttag = ttag.to_vec();
         let in_block = tt > 0 && matches!(ttag.as_slice(), b"style" | b"script" | b"title" | b"svg" | b"annotation");
+        let pre_tag = matches!(ttag.as_slice(), b"pre" | b"textarea" | b"listing" | b"xmp");
+        if pre_tag {
+            pre = tt > 0;
+        }
 
         // a kovetkezo tag
         let mut np = find(data, b"<", q);
@@ -352,8 +357,30 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
             // acco<wbr>unt, acco<img src=1px>unt, x<sup>2</sup>; minden mas tag szokozt tesz
             text.push(b' ');
         }
-        text.extend_from_slice(txt);
-        tlen += bstrip(txt).len();
+        if pre {
+            // whitespace-megorzo elem: a sorvegek sortoresek (<BR>); a nyito tag utani elso sorveg a HTML szerint nem szamit
+            let mut t = txt;
+            if tt > 0 && pre_tag {
+                if t.starts_with(b"\r\n") {
+                    t = &t[2..];
+                } else if t.starts_with(b"\n") {
+                    t = &t[1..];
+                }
+            }
+            let mut conv: Vec<u8> = Vec::with_capacity(t.len() + 16);
+            for &b in t {
+                if b == b'\n' {
+                    conv.extend_from_slice(b"<BR>");
+                } else {
+                    conv.push(b);
+                }
+            }
+            tlen += bstrip(&conv).len();
+            text.extend_from_slice(&conv);
+        } else {
+            text.extend_from_slice(txt);
+            tlen += bstrip(txt).len();
+        }
     }
 
     let joined = bjoin_ws(&text);
