@@ -632,11 +632,11 @@ def parse_htmlhead(data,charset=None):
   for ret in data.split(b'<'):
     tag=ret.split(b'>')[0].lower()
     if tag.startswith(b'meta'):
-      p=tag.find(b'charset=')
-      if p>=0:
+      m=re.search(rb'charset\s*=',tag)
+      if m:
 #        print(tag)
         cs=""
-        for c in tag[p+8:]:
+        for c in tag[m.end():]:
           if c<=32: continue  # whitespace
           if c==34 or c==39:  # idezojelek
             if cs: break
