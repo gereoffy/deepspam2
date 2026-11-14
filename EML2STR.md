@@ -40,6 +40,8 @@ az RTF részeket viszont a beépített kinyerővel feldolgozza.
 | `rtf_token_re`, `rtf_skip_groups`, `rtf_transparent_groups`, `rtf_fcharset_cp`, `rtf_font_re`, `rtf_special_words`, `rtf_special_syms` | | Az `rtf_fallback_text()` tokenizáló regexe, a kihagyandó (nem szöveg) csoportok, a szöveget tartalmazó `\*`-os csoportok (`shpinst`, `do`: szövegdobozok), a `\fcharsetN` → kódlap tábla, a fonttábla `\fN` bejegyzéseit kereső regex (`rtf_font_codepages()`), és a nevesített írásjelek / szimbólumok leképezése. |
 | `INLINE_TAGS` | `set[str]` | A `html2text()` soron belüli tagjei, amik nem törik meg a szót (nem kerül szóköz a helyükre); lásd ott. |
 | `PRE_TAGS` | `set[str]` | A `html2text()` whitespace-megőrző elemei (`pre`, `textarea`, `listing`, `xmp`): bennük a sorvég sortörés; lásd ott. |
+| `BLOCK_TAGS`, `P_CLOSERS` | `set[str]` | A `html2text()` blokk-elemei (nyitó és záró tagjuk sortörés) és közülük azok, amelyek nyitó tagja implicit lezárja a `<p>`-t; lásd ott. |
+| `_NL_RE`, `_nl_count()` | `re.Pattern`, függvény | A `html2text()` sortörés-jelölőinek (`<BR>`, `<P>`, `<B>`) futama → sortörések száma: a `<BR>`-ek száma + 2, ha van `<P>`, különben 1, ha van `<B>`. |
 | `LINK_ATTRS` | `dict[str, str]` | HTML tag → attribútum, amiből URL-t kell kinyerni (`a/href`, `iframe/src`, `form/action`, …). |
 | `TAG_END_RE` | `re.Pattern` | A tag végének keresése a HTML5 tokenizer szerint (lásd `html2text()`). |
 | `TAG_END_USE_RE` | `bool` | `True` CPythonban: a `html2text()` a `TAG_END_RE`-t használja. PyPy alatt `False`: ott ugyanez bájtonkénti ciklussal fut, mert a JIT-elt ciklus a gyorsabb. |
@@ -264,13 +266,22 @@ Jellemzők:
   `mso-hide:all`, `opacity` 0.5 alatt (`opacity_hidden()`). A tag utáni szöveg (a következő tagig) kimarad;
   kivétel a levél eleji (még szöveg előtti) rejtett "preheader", ami `[...]` közé téve bekerül.
   MS Teams `signedadaptivecard` rejtett base64 adat kihagyva.
-- `div`, `p`, `br`, `tr` → sortörés; a whitespace-megőrző elemek (`PRE_TAGS`: `pre`, `textarea`, `listing`, `xmp`) belsejében a
-  sorvégek is sortörések (a nyitó tag utáni első sorvég a HTML szerint nem számít), így pl. a DSN levelek `<pre>`-be írt eredeti
-  fejlécei nem folynak egybe; a soron belüli (phrasing) elemek (`INLINE_TAGS`: `span`, `a`, `b`, `i`, `u`, `em`, `strong`,
+- Sortörések a böngésző megjelenítése (Chrome `innerText`) szerint, 59 mintán ellenőrizve: a `<br>` mindig egy sortörés (több `<br>`
+  több üres sor; a `</br>`-t a HTML5 is `<br>`-ként értelmezi); a blokk-elemek (`BLOCK_TAGS`: `div`, `table`, `tr`, `ul`, `li`, `h1`–`h6` (a `tag_type()` szerint `h`),
+  `hr`, `form`, `blockquote`, `pre`…) nyitó és záró tagje blokkhatár, ami egy sortörés, a `<p>`-é kettő (üres sor; a záró `</p>` és az
+  implicit lezárás `<p>a<p>b` is). Az egymás melletti blokkhatárok nem adódnak össze, a legnagyobb számít (`</p><p>` egy üres sor,
+  `<p></p>` nem ad plusz sort, `</pre><pre>` egy sortörés), a `<br>` viszont hozzáadódik (`<p>a<br></p><p>b</p>` → `a`, két üres
+  sor, `b`). A legtöbb blokk-elem nyitó tagja implicit lezárja a nyitott `<p>`-t (`P_CLOSERS`, a HTML parser szabálya: `<p>a<div>b</div>c`
+  → `a`, üres sor, `b`, sortörés, `c`). A whitespace-megőrző elemek (`PRE_TAGS`: `pre`, `textarea`, `listing`, `xmp`) belsejében a
+  sorvégek is sortörések (a nyitó tag utáni első sorvég nem számít), így a DSN levelek `<pre>`-be írt eredeti fejlécei nem folynak
+  egybe. A szöveg elején és végén nincs sortörés. Nem követett parser-trükkök: a táblázaton kívüli `tr`/`td`/`tbody`/`caption` tagokat
+  a böngésző eldobja (itt blokkhatár / szóköz marad), a `textarea` és a lezárt `details` tartalmát nem mutatja (itt megmarad, a
+  szűrőnek kell), a `pre` behúzását és a cellák közti tabot a whitespace-összevonás szóközzé teszi.
+- A soron belüli (phrasing) elemek (`INLINE_TAGS`: `span`, `a`, `b`, `i`, `u`, `em`, `strong`,
   `abbr`, `font`, `s`, `strike`, `small`, `big`, `tt`, `sub`, `sup`, `code`, `kbd`, `samp`, `var`, `cite`, `q`, `dfn`, `mark`, `ins`,
   `del`, `bdi`, `bdo`, `time`, `data`, `label`, `nobr`, `acronym`, `blink`, a nulla szélességű `wbr` és az `img`) és a kommentek
   (`<!--…-->`, `<!…>`, `<?…>`) nem tesznek szóközt (`vi<!-- x -->agra` → `viagra`, `acco<wbr>unt` → `account`,
-  `acco<img src=1px.gif>unt` → `account`), minden más tag (blokkok, listaelemek, cellák, form-vezérlők, `rt`/`rp`) szóközt tesz.
+  `acco<img src=1px.gif>unt` → `account`), minden más tag (`td`/`th`, form-vezérlők, `rt`/`rp`…) szóközt tesz.
 - Felesleges whitespace összevonása, soronkénti strip.
 - A `LINK_ATTRS` szerinti linkek (sorrendtartó deduplikálással) csak `debug=True` esetén, a debug HTML végére kerülnek
   `URL: <max. 128 karakter>` sorokként; a kinyert szövegbe nem (a Rust port ezért nem is gyűjti őket).
@@ -357,7 +368,7 @@ Egy (kisbetűsített, `<>` nélküli) tagból meghatározza a nevét és típus�
 - **Visszatérés:** `tuple[int, str]` = `(típus, név)`, ahol típus: `1` = nyitó, `-1` = záró,
   `0` = önzáró / void elem (`br`, `img`, `meta`, …) vagy speciális (`!` = doctype/komment, `?` = XML PI).
   A névben csak az `a–z` betűket veszi figyelembe (pl. `h1`…`h6` → `h`). Ez szándékos: a számra
-  nincs szükség, és így egyszerűbb a tagnév-ellenőrzés.
+  nincs szükség, a `h` egyben ellenőrizhető (`BLOCK_TAGS`).
 
 ### `parse_ics(data)`
 iCalendar (`.ics`) tartalomból kiszedi a leírást.

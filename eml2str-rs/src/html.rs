@@ -180,6 +180,7 @@ fn tag_type(tag: &[u8]) -> (i32, &[u8]) {
             break;
         }
         if !(97..=122).contains(&c) {
+            // csak betuk: a szamjegyek szandekosan kimaradnak (h1..h6 -> "h", igy egyben ellenorizheto)
             break;
         }
         if !started {
@@ -259,6 +260,7 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
     let mut tlen = 0usize;
     let mut tagbuf: Vec<u8> = Vec::new();
     let mut pre = false; // <pre> (eml2str.PRE_TAGS) belsejeben vagyunk
+    let mut in_p = false; // nyitott <p> (a P_CLOSERS blokk-elemek implicit lezarjak)
 
     while p < n {
         let mut q = p + 1;
@@ -345,8 +347,21 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
             }
         }
 
-        if tag == b"div" || (tt >= 0 && matches!(ttag.as_slice(), b"p" | b"br" | b"tr")) {
+        // sortores-jelolok a bongeszo (innerText) szerint, lasd eml2str.BLOCK_TAGS: <br> sortores (a </br> is), p bekezdeshatar
+        // (ures sor), a tobbi blokk-elem nyito es zaro tagje blokkhatar (sortores); a futamokat a vegen a render_breaks() oldja fel
+        if ttag.as_slice() == b"br" {
             text.extend_from_slice(b"<BR>");
+        } else if ttag.as_slice() == b"p" {
+            text.extend_from_slice(b"<P>");
+            in_p = tt > 0;
+        } else if pre_tag || is_block_tag(&ttag) {
+            if in_p && tt >= 0 && closes_p(&ttag) {
+                // a nyito blokk-tag implicit lezarja a <p>-t (eml2str.P_CLOSERS)
+                text.extend_from_slice(b"<P>");
+                in_p = false;
+            } else {
+                text.extend_from_slice(b"<B>");
+            }
         } else if !matches!(
             ttag.as_slice(),
             b"wbr" | b"span" | b"a" | b"b" | b"i" | b"u" | b"em" | b"strong" | b"abbr" | b"font" | b"s" | b"strike" | b"small" | b"big" | b"tt"
@@ -384,25 +399,63 @@ pub fn html2text(data: &[u8]) -> Vec<u8> {
     }
 
     let joined = bjoin_ws(&text);
-    let mut out = Vec::with_capacity(joined.len() + 64);
-    let mut first = true;
-    let mut rest: &[u8] = &joined;
-    loop {
-        let (seg, next) = match find(rest, b"<BR>", 0) {
-            Some(i) => (&rest[..i], Some(&rest[i + 4..])),
-            None => (rest, None),
-        };
-        if !first {
-            out.push(b'\n');
+    bstrip(&render_breaks(&joined)).to_vec()
+}
+
+/// eml2str.BLOCK_TAGS a PRE_TAGS nelkul: blokk-elemek, a nyito es zaro tagjuk blokkhatar (sortores)
+fn is_block_tag(t: &[u8]) -> bool {
+    matches!(
+        t,
+        b"div" | b"tr" | b"table" | b"thead" | b"tbody" | b"tfoot" | b"caption" | b"ul" | b"ol" | b"li" | b"dl" | b"dt" | b"dd" | b"h" | b"blockquote" | b"hr" | b"address" | b"article" | b"aside" | b"section" | b"header" | b"footer"
+            | b"nav" | b"main" | b"figure" | b"figcaption" | b"form" | b"fieldset" | b"legend" | b"details" | b"summary" | b"center" | b"dir"
+            | b"menu" | b"dialog" | b"hgroup" | b"select" | b"option" | b"optgroup" | b"html" | b"head" | b"body"
+    )
+}
+
+/// eml2str.P_CLOSERS: a nyito tagjuk implicit lezarja a nyitott <p>-t (HTML parser: "close a p element")
+fn closes_p(t: &[u8]) -> bool {
+    matches!(
+        t,
+        b"div" | b"table" | b"ul" | b"ol" | b"li" | b"dl" | b"dt" | b"dd" | b"h" | b"blockquote" | b"hr" | b"address" | b"article" | b"aside" | b"section" | b"header" | b"footer" | b"nav" | b"main" | b"figure" | b"figcaption" | b"form"
+            | b"fieldset" | b"details" | b"summary" | b"center" | b"dir" | b"menu" | b"dialog" | b"hgroup" | b"pre" | b"listing" | b"xmp"
+    )
+}
+
+/// eml2str._NL_RE / _nl_count(): a sortores-jelolok futama (koztuk / korulottuk a whitespace-osszevonas utani egy szokoz) ->
+/// annyi \n, ahany <BR>, plusz 2, ha van <P>, kulonben 1, ha van <B> (az egymas melletti blokkhatarok nem adodnak ossze)
+fn render_breaks(s: &[u8]) -> Vec<u8> {
+    let n = s.len();
+    let mut out = Vec::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        let mut j = if s[i] == b' ' { i + 1 } else { i };
+        let (mut brs, mut p, mut blk) = (0usize, false, false);
+        loop {
+            if s[j..].starts_with(b"<BR>") {
+                brs += 1;
+                j += 4;
+            } else if s[j..].starts_with(b"<P>") {
+                p = true;
+                j += 3;
+            } else if s[j..].starts_with(b"<B>") {
+                blk = true;
+                j += 3;
+            } else {
+                break;
+            }
+            if j < n && s[j] == b' ' {
+                j += 1;
+            }
         }
-        first = false;
-        out.extend_from_slice(bstrip(seg));
-        match next {
-            Some(r) => rest = r,
-            None => break,
+        if brs > 0 || p || blk {
+            let k = brs + if p { 2 } else if blk { 1 } else { 0 };
+            out.resize(out.len() + k, b'\n');
+            i = j;
+        } else {
+            out.push(s[i]);
+            i += 1;
         }
     }
-
     out
 }
 

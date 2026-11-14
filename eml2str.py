@@ -662,7 +662,7 @@ def tag_type(tag):
         if c<=32:  # whitespace
             if not name: continue # a tag neve elotti whitespace
             break # done
-        if c<97 or c>122: break  # fixme: szamokat is le kene kezelni!
+        if c<97 or c>122: break  # csak betuk: a szamjegyek szandekosan kimaradnak (h1..h6 -> 'h', igy egyben ellenorizheto)
         name+=chr(c)
 #    print(name)
     if name in ['br','area','base','meta','col','embed','hr','img','input','link','param','source','track','wbr']: return 0,name # self-closing tags
@@ -696,6 +696,21 @@ TAG_END_RE=re.compile(rb'''
 # soron beluli (phrasing) tagek, amik nem torik meg a szot (a html2text nem tesz szokozt a helyukre): szovegszintu jelolok,
 # sub/sup, a nulla szelessegu wbr, a (gyakran 1px-es, szo kozepebe szurt) img, es a kommentek / <?..?> ('!', '?')
 PRE_TAGS={'pre','textarea','listing','xmp'}  # whitespace-megorzo elemek: bennuk a sorveg sortores (DSN "Original message headers" <pre> blokk)
+# Sortoresek a bongeszo (innerText) szerint: a <br> mindig egy sortores (tobb <br> tobb ures sor), a blokk-elemek nyito es zaro tagje
+# blokkhatar, ami egy sortores, a <p>-e ketto (ures sor), de az egymas melletti blokkhatarok nem adodnak ossze (a legnagyobb szamit:
+# </p><p> = egy ures sor, <p></p> nem ad plusz sort, </pre><pre> egy sortores), a <br> viszont a blokkhatarhoz hozzaadodik
+# (<p>a<br></p><p>b</p> = 3 sortores). A td/th es minden mas nem-inline tag szokoz. A <p>-t a legtobb blokk-elem nyito tagja
+# implicit lezarja (P_CLOSERS, a HTML parser szabalya): <p>a<div>b</div>c = a, ures sor, b, sortores, c.
+# Nem kovetett parser-trukkok: a tablazaton kivuli tr/td/tbody/caption tagokat a bongeszo eldobja (itt blokkhatar / szokoz marad),
+# a textarea es a lezart details tartalmat nem mutatja (itt megmarad, a szuronek kell).
+BLOCK_TAGS={'div','tr','table','thead','tbody','tfoot','caption','ul','ol','li','dl','dt','dd','h','blockquote','hr',  # h = h1..h6 (tag_type)
+            'address','article','aside','section','header','footer','nav','main','figure','figcaption','form','fieldset','legend','details',
+            'summary','center','dir','menu','dialog','hgroup','select','option','optgroup','html','head','body'}|PRE_TAGS
+P_CLOSERS=BLOCK_TAGS-{'tr','table','thead','tbody','tfoot','caption','legend','select','option','optgroup','html','head','body','textarea'}|{'table'}
+_NL_RE=re.compile(rb' ?(?:(?:<BR>|<P>|<B>) ?)+')  # sortores-jelolok futama (koztuk / korulottuk a whitespace-osszevonas utani egy szokoz)
+def _nl_count(m):
+    s=m.group()
+    return b'\n'*(s.count(b'<BR>')+(2 if b'<P>' in s else 1 if b'<B>' in s else 0))
 INLINE_TAGS={'wbr','span','a','b','i','u','em','strong','abbr','font','s','strike','small','big','tt','sub','sup','code','kbd',
     'samp','var','cite','q','dfn','mark','ins','del','bdi','bdo','time','data','label','nobr','acronym','blink','img','!','?'}
 
@@ -755,6 +770,7 @@ def html2text(data,debug=False,colors=None):
   text=[data[:p]] if p>0 else []  # initial text before 1st tag
   tlen=0 #len(data[:p].strip())
   pre=False  # <pre> (PRE_TAGS) belsejeben vagyunk
+  in_p=False # nyitott <p> (a P_CLOSERS blokk-elemek implicit lezarjak)
 
   if debug:
       if colors: html=[reset]
@@ -877,8 +893,11 @@ def html2text(data,debug=False,colors=None):
 #                if len(txt.strip())>=3: text+=[b'{{'+txt+b'}}'] # hidden text
             continue
 
-    if tag==b'div' or (tt>=0 and ttag in ['p','br','tr']):
-        text+=[b'<BR>']  # https://www.w3schools.com/html/html_blocks.asp
+    if ttag=='br': text+=[b'<BR>']  # sortores (a </br>-t a HTML5 is <br>-kent ertelmezi)
+    elif ttag=='p': text+=[b'<P>']; in_p=tt>0  # bekezdeshatar: ures sor (a zaro </p> es az implicit lezaras <p>a<p>b is)
+    elif ttag in BLOCK_TAGS:
+        if in_p and tt>=0 and ttag in P_CLOSERS: text+=[b'<P>']; in_p=False  # a nyito blokk-tag implicit lezarja a <p>-t
+        else: text+=[b'<B>']  # blokkhatar: sortores
     else:
         # inline (phrasing) elemek es a kommentek nem torik meg a szot: vi<!-- x -->agra = viagra, acco<wbr>unt, acco<img src=1px>unt,
         # x<sup>2</sup>; minden mas tag (blokkok, listaelemek, cellak, form-vezerlok, ruby rt/rp...) szokozt tesz
@@ -893,7 +912,7 @@ def html2text(data,debug=False,colors=None):
 
   text=b''.join(text)
   text=b' '.join(text.split())  # remove redundant spaces
-  text=b'\n'.join([ t.strip() for t in text.split(b'<BR>') ])
+  text=_NL_RE.sub(_nl_count,text).strip()  # a sortores-jelolok -> \n (lasd BLOCK_TAGS), a szoveg elejen / vegen nincs sortores
 
   urls=list(dict.fromkeys(urls))  # sorrend-megorzo dedup az URL listan
 #  for url in urls: text+=b'\nURL: '+url[:128].encode("utf-8")
