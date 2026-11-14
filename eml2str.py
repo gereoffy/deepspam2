@@ -944,6 +944,7 @@ def parse_ics(data):
 
     for x in ics:
 #        print(x)
+        if len(x)<2: continue  # hibas, kettospont nelkuli naptarmezo
         if x[0][:11]==b'DESCRIPTION': return unescape(x[1])  # DESCRIPTION;LANGUAGE=hu-HU:Kedves Endre\,\n\n\nSzeretettel
         if x[0]==b'X-ALT-DESC;FMTTYPE=text/html': return html2text(unescape(x[1]))
     return b'' #  FIXME
