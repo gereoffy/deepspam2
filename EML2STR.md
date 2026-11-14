@@ -108,7 +108,7 @@ Az első pár: `"RAW message: N bytes"` ↔ a teljes nyers levél. Utána MIME r
 | ha nincs fájlnév | típussor: behúzás + típus + `[charset]` + `(nyers méret)` + payload méret | a dekódolt payload (vagy ha nincs, a nyers rész) |
 | ha van fájlnév | típussor | a nyers rész (fejléccel együtt) |
 | | `disposition: fájlnév` sor | a dekódolt payload (vagy a nyers rész) |
-| ha van kinyert szöveg, és eltér a payloadtól | `Extracted text: <karakter>/<bájt>` | a kinyert szöveg UTF-8 bájtokként |
+| ha van kinyert szöveg, és eltér a payloadtól | `Extracted text: <karakter>/<bájt>` | a kinyert szöveg UTF-8 bájtokként; HTML/XML résznél a felesleges szóközök nélkül, és az üres sorokból legfeljebb egy marad egymás után (a bekezdések tagolása megmarad, a 20–30 üres sor nem) |
 
 HTML / XML résznél a payload blokk a `html2text(debug=True)` által "prettify"-olt, annotált HTML, a `colors` szerint jelölve, és a rész charsetje szerint UTF-8-ra átkódolva (`safe_decode`), hogy a néző ékezetesen mutassa; a sorok elején álló pozíciók a nyers bájtokra vonatkoznak.
 

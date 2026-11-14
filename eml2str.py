@@ -1100,7 +1100,12 @@ def get_mimedata(eml,colors=None):
             if ctyp.startswith("text/") or ctyp=="application/ics" or (ctyp=="application/ms-tnef" and tnef_support) or ctyp=="application/rtf" or ctyp=="application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 html=decode_payload(pay,ctyp,cset) # ez meg a prettify elott kell, mert az elbassza a whitespacet...
                 if ctyp=="text/html" or ctyp=="text/xml":
-                    html="\n".join([" ".join(s.split()) for s in html.splitlines() if s]) # remove empty lines and redundant spaces
+                    # felesleges szokozok ki, az ures sorokbol legfeljebb egy marad egymas utan (a tagolashoz kell, de a 20-30 ures sor zavaro)
+                    lines=[]
+                    for l in (" ".join(s.split()) for s in html.splitlines()):
+                        if l or (lines and lines[-1]): lines.append(l)
+                    while lines and not lines[-1]: lines.pop()
+                    html="\n".join(lines)
                     dtext,dhtml=html2text(pay,debug=True,colors=colors)  # html prettify :)
                     pay=b''.join(dhtml)
                     if cset: pay=safe_decode(pay,charset_name(cset)).encode("utf-8")  # a nyers (pl. latin2) byte-ok helyett utf-8, hogy a nezo ekezetesen mutassa
