@@ -579,6 +579,14 @@ def rtf_fallback_text(text,encoding="cp1252"):
     if hexes and not hx:
       out.append(bytes.fromhex(''.join(hexes)).decode(fonts.get(font,encoding),'ignore')); hexes=[]
     after_star,star=star,False
+    if curskip:
+      if brace: curskip=0  # a csoporthatar veget vet a helyettesito karakterek kihagyasanak
+      elif txt:
+        nskip=min(curskip,len(txt)); curskip-=nskip; txt=txt[nskip:]
+      elif word or sym or hx:
+        curskip-=1  # egy vezerloszo / escape egy helyettesito karakter
+        if word=='bin' and arg: pos+=max(0,int(arg))  # a binaris adattal egyutt is csak egy
+        continue
     if brace=='{':
       stack.append((skip,ucskip,font)); group_start=True; depth+=1; in_document=True; continue
     if brace=='}':
@@ -598,7 +606,7 @@ def rtf_fallback_text(text,encoding="cp1252"):
       elif word=='plain': font=deff
       elif skip: pass
       elif word in rtf_special_words: out.append(rtf_special_words[word])
-      elif word=='uc' and arg: ucskip=int(arg)
+      elif word=='uc' and arg: ucskip=max(0,int(arg))
       elif word=='u' and arg:
         c=int(arg); c=c+0x10000 if c<0 else c  # a szabvany szerint elojeles 16 bites szam
         out.append(chr(c) if 0<=c<=0x10FFFF else "\ufffd"); curskip=ucskip  # tartomanyon kivul (pl. \u9999999999): ne dobjon kivetelt
@@ -606,10 +614,8 @@ def rtf_fallback_text(text,encoding="cp1252"):
       if sym=='*' and first: skip=True; star=True; group_start=True  # a kovetkezo szo meg a csoport "elso" szava
       elif not skip and sym in rtf_special_syms: out.append(rtf_special_syms[sym])
     elif hx:
-      if curskip: curskip-=1
-      elif not skip: hexes.append(hx)
+      if not skip: hexes.append(hx)
     elif txt and not skip:
-      if curskip: txt=txt[curskip:]; curskip=0
       out.append(txt)
   if hexes: out.append(bytes.fromhex(''.join(hexes)).decode(fonts.get(font,encoding),'ignore'))
   return ''.join(out)

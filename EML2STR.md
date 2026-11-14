@@ -338,7 +338,9 @@ Beépített, függőség nélküli, egymenetes RTF → szöveg kinyerő (tartal�
 - A `\'xx` escape-eket az aktuális font `\fcharset`-je (`rtf_font_codepages()`), ennek hiányában az `encoding`
   szerint dekódolja (az egymás utáni bájtokat együtt, így a többbájtos kódlapok is működnek); a `\uN` → Unicode
   karakter (negatív N: +65536; a tartományon kívüli, pl. `\u9999999999` U+FFFD lesz, kivétel nélkül), a `\ucN`
-  szerinti helyettesítő karakterek kimaradnak.
+  szerinti helyettesítő karakterek kimaradnak. A számláló több szövegtokenen át is megmarad; kihagyás közben
+  minden vezérlőszó / escape egy karakternek számít (a `\binN` a teljes bináris adattal együtt), a `{` és `}`
+  pedig megszakítja a kihagyást. Negatív `\ucN` esetén a kihagyandó darabszám 0.
 - A legkülső csoport bezárásával a dokumentumnak vége (mint a striprtf-ben): a záró `}` utáni rész (pl. a TNEF-ből
   jövő RTF végi NUL bájt) már nem kerül a szövegbe.
 - `\par`, `\line`, `\row`… → sortörés, `\tab`, `\cell` → tab, a nevesített írásjelek (`\emdash`,
