@@ -765,6 +765,8 @@ def html2text(data,debug=False,colors=None):
       return col+b.replace(b'\n',reset+b'\n'+col)+reset if col and b else b
 
   p=data.find(b'<')
+  while p>=0 and (p+2>=len(data) or data[p+1] not in b'/!?abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'):
+      p=data.find(b'<',p+1)  # mint a kesobbi tag-eknel: a sima '<' a szoveg resze
   if p<0: # not html!?
       return (data,[_c('_text',data)]) if debug else data
   text=[data[:p]] if p>0 else []  # initial text before 1st tag
