@@ -261,14 +261,9 @@ fn flush_hex(out: &mut PyStr, hexes: &mut Vec<u8>, fonts: &HashMap<String, &'sta
     Ok(())
 }
 
-/// Python slice txt[k:] (k lehet negativ is) kodpontokban
-fn py_slice_from(s: &str, k: i64) -> &str {
-    let n = s.chars().count() as i64;
-    let start = if k < 0 { (n + k).max(0) } else { k.min(n) };
-    match s.char_indices().nth(start as usize) {
-        Some((i, _)) => &s[i..],
-        None => "",
-    }
+/// \binN: N kodpont atugrasa (a Python mar dekodolt str-en dolgozik).
+fn skip_chars(text: &str, pos: usize, count: i64) -> usize {
+    text[pos..].char_indices().nth(count.max(0) as usize).map_or(text.len(), |(i, _)| pos + i)
 }
 
 /// rtf_fallback_text() + fix_surrogates()
@@ -289,7 +284,7 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
     let mut pos = 0usize;
     let n = text.len();
     while pos < n {
-        let Some((tok, np)) = next_token(text, pos) else { break };
+        let Some((mut tok, np)) = next_token(text, pos) else { break };
         pos = np;
         let is_hex = matches!(tok, Tok::Hex(_));
         if !hexes.is_empty() && !is_hex {
@@ -297,6 +292,28 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
         }
         let after_star = star;
         star = false;
+        if curskip > 0 {
+            match tok {
+                Tok::Open | Tok::Close => curskip = 0,
+                Tok::Text(txt) => {
+                    let mut chars = txt.chars();
+                    while curskip > 0 && chars.next().is_some() {
+                        curskip -= 1;
+                    }
+                    tok = Tok::Text(chars.as_str());
+                }
+                Tok::Word("bin", Some(arg)) => {
+                    curskip -= 1; // a binaris adattal egyutt is egy helyettesito karakter
+                    pos = skip_chars(text, pos, py_int(arg).unwrap_or(0));
+                    continue;
+                }
+                Tok::Word(..) | Tok::Sym(_) | Tok::Hex(_) => {
+                    curskip -= 1;
+                    continue;
+                }
+                Tok::Newline => {}
+            }
+        }
         match tok {
             Tok::Open => {
                 stack.push((skip, ucskip, font.clone()));
@@ -325,16 +342,7 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
         match tok {
             Tok::Word(word, arg) => {
                 if word == "bin" && arg.is_some() {
-                    let k = py_int(arg.unwrap()).unwrap_or(0).max(0);
-                    // pos += k kodpontban
-                    let mut p = pos;
-                    for _ in 0..k {
-                        match text[p..].chars().next() {
-                            Some(c) => p += c.len_utf8(),
-                            None => break,
-                        }
-                    }
-                    pos = p;
+                    pos = skip_chars(text, pos, py_int(arg.unwrap()).unwrap_or(0));
                     continue;
                 }
                 if after_star && TRANSPARENT_GROUPS.contains(&word) {
@@ -352,7 +360,7 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
                 } else if let Some(s) = special_word(word) {
                     out.push_str(s);
                 } else if word == "uc" && arg.is_some() {
-                    ucskip = py_int(arg.unwrap()).unwrap_or(0);
+                    ucskip = py_int(arg.unwrap()).unwrap_or(0).max(0);
                 } else if word == "u" && arg.is_some() {
                     let c = py_int(arg.unwrap()).unwrap_or(0);
                     let c = if c < 0 { c + 0x10000 } else { c }; // a szabvany szerint elojeles 16 bites szam
@@ -373,20 +381,13 @@ pub fn rtf_to_text(text: &str, encoding: &str) -> Result<String, PyErr> {
                 }
             }
             Tok::Hex(h) => {
-                if curskip != 0 {
-                    curskip -= 1;
-                } else if !skip {
+                if !skip {
                     hexes.push(h);
                 }
             }
             Tok::Text(txt) => {
                 if !skip {
-                    let mut t = txt;
-                    if curskip != 0 {
-                        t = py_slice_from(txt, curskip);
-                        curskip = 0;
-                    }
-                    out.push_str(t);
+                    out.push_str(txt);
                 }
             }
             _ => {}

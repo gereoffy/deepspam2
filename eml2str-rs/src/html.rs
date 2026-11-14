@@ -117,7 +117,12 @@ pub fn unescape(s: &str) -> String {
     out
 }
 
-/// parse_htmlhead(): <meta ... charset=XXX> a <body> elotti reszben
+fn re_meta_charset() -> &'static regex::bytes::Regex {
+    static R: OnceLock<regex::bytes::Regex> = OnceLock::new();
+    R.get_or_init(|| regex::bytes::Regex::new(r"charset[\t\n\x0b\x0c\r ]*=").unwrap())
+}
+
+/// parse_htmlhead(): <meta ... charset = XXX> a <body> elotti reszben
 pub fn parse_htmlhead(data: &[u8], charset: Option<String>) -> Option<String> {
     for ret in data.split(|&b| b == b'<') {
         let tag = match ret.iter().position(|&b| b == b'>') {
@@ -128,9 +133,9 @@ pub fn parse_htmlhead(data: &[u8], charset: Option<String>) -> Option<String> {
             continue;
         }
         let tag = blower(tag);
-        if let Some(p) = find(&tag, b"charset=", 0) {
+        if let Some(m) = re_meta_charset().find(&tag) {
             let mut cs = String::new();
-            for &c in &tag[p + 8..] {
+            for &c in &tag[m.end()..] {
                 if c <= 32 {
                     continue;
                 }
@@ -254,7 +259,15 @@ fn tag_end(data: &[u8], mut q: usize) -> usize {
 /// html2text() (debug=False valtozat)
 pub fn html2text(data: &[u8]) -> Vec<u8> {
     let n = data.len();
-    let Some(mut p) = find(data, b"<", 0) else { return data.to_vec() };
+    let mut p = 0;
+    loop {
+        let Some(start) = find(data, b"<", p) else { return data.to_vec() };
+        p = start;
+        if p + 2 < n && (matches!(data[p + 1], b'/' | b'!' | b'?') || data[p + 1].is_ascii_alphabetic()) {
+            break;
+        }
+        p += 1; // mint a kesobbi tag-eknel: a sima '<' a szoveg resze
+    }
     let mut text: Vec<u8> = Vec::with_capacity(n / 2);
     text.extend_from_slice(&data[..p]);
     let mut tlen = 0usize;

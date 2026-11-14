@@ -163,7 +163,10 @@ fn parse_ctyp(data: &[u8], hdr: &[u8], ct: &mut Ct) {
         let c = data[q];
         q += 1;
         if ijel != 0 {
-            if c == ijel {
+            if c == b'\\' && q < data.len() {
+                value.push(data[q]);
+                q += 1;
+            } else if c == ijel {
                 ijel = 0;
             } else {
                 value.push(c);
@@ -182,6 +185,9 @@ fn parse_ctyp(data: &[u8], hdr: &[u8], ct: &mut Ct) {
                 value.push(c);
             }
         } else if c == 61 {
+            while name.last().is_some_and(|&b| b <= 32) {
+                name.pop();
+            }
             eqsn = true;
         } else if !name.is_empty() || c > 32 {
             name.push(c);
@@ -216,11 +222,13 @@ fn ascii_lower(b: &[u8]) -> String {
     b.iter().filter(|c| c.is_ascii()).map(|c| c.to_ascii_lowercase() as char).collect()
 }
 
-/// hsize: min(find(b'\n\n')+2, find(b'\r\n\r\n')+4) a data[p0:pend]-ben, kulonben pend - egyetlen menetben
-/// (a Python ket kulon keresest csinal, CRLF-es levelnel a \n\n keresese a resz vegeig fut)
+/// A fejlecvege abszolut pozicioja az elso ures sor utan, kulonben pend - egyetlen menetben, mint a Pythonban.
 fn header_end(data: &[u8], p0: usize, pend: usize) -> usize {
     let d = &data[..pend];
     for i in memchr::memchr_iter(b'\n', &d[p0..]).map(|i| i + p0) {
+        if i == p0 || (i == p0 + 1 && d[p0] == b'\r') {
+            return i + 1; // ures fejlec: az elso sor mar az elvalaszto
+        }
         if i + 1 < pend && d[i + 1] == b'\n' {
             return i + 2;
         }
@@ -247,7 +255,7 @@ pub fn parse_eml(data: &[u8], level: usize, p0: usize, pend: usize) -> Result<Em
             line = rest;
         }
         if !line.is_empty() && (line[0] == 9 || line[0] == 32) {
-            let Some(h) = hdr.as_mut() else { return Err(PyErr("TypeError")) };
+            let Some(h) = hdr.as_mut() else { continue }; // arva folytatosor
             let mut k = 0;
             while k < line.len() && (line[k] == b'\t' || line[k] == b' ') {
                 k += 1;
@@ -274,18 +282,14 @@ pub fn parse_eml(data: &[u8], level: usize, p0: usize, pend: usize) -> Result<Em
 
     let mut ct = Ct::default();
     for h in &headers {
-        let colon = h.iter().position(|&b| b == b':');
-        let name = match colon {
-            Some(c) => &h[..c],
-            None => &h[..],
-        };
+        let Some(c) = h.iter().position(|&b| b == b':') else { continue };
+        let name = &h[..c];
         let key: &[u8] = match blower(name).as_slice() {
             b"content-type" => b"_ct",
             b"content-disposition" => b"_cd",
             b"content-transfer-encoding" => b"_ce",
             _ => continue,
         };
-        let Some(c) = colon else { return Err(PyErr("IndexError")) };
         parse_ctyp(&h[c + 1..], key, &mut ct);
     }
 
@@ -356,7 +360,7 @@ pub fn parse_eml(data: &[u8], level: usize, p0: usize, pend: usize) -> Result<Em
                 first = false;
             }
         }
-    } else if level < MAX_DEPTH && ctyp.starts_with("message/") {
+    } else if level < MAX_DEPTH && ctyp.starts_with("message/") && !matches!(cenc.as_str(), "base64" | "quoted-printable") {
         eml.parts.push(parse_eml(data, level + 1, hsize, pend)?);
     } else {
         let body = if hsize <= pend { &data[hsize..pend] } else { &b""[..] };

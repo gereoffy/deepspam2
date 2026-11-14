@@ -6,6 +6,12 @@ részek jelentenek, lásd az ismert eltéréseknél.
 
 ## Állapot
 
+- **Python-szinkron, 2026-11-14:** a hibás fejlécsorok és naptármezők kihagyása, MIME-paraméterek whitespace- és
+  escape-kezelése, üres fejlécszakasz, kódolt `message/*` részek leafként kezelése, első HTML-tag felismerése,
+  meta charset körüli whitespace, `text/rtf`, az RTF Unicode-helyettesítők számlálása és az ICS escape-ek
+  egymenetes feloldása átvezetve. A szándékosan meghagyott heurisztikák változatlanok, nincs `_data` kivétel.
+  Ellenőrzés: `cargo test --offline` (10 regressziós teszt), release build, valamint 3696 célzott és 1500 valódi
+  levélen (`Junk-all.mbox`) Python–Rust összehasonlítás: **0 eltérés**.
 - **Valódi levelek** (13 150 levél, 6,8 GB) és **Junk.mbox** (2281 levél): a kimenet bájtra azonos a Pythonéval
   (önálló programként és Python-modulként is).
 - **Junk-all.mbox** (30 270 spam, 1 GB): bájtra azonos, kivéve 23 CJK kódlapú levelet (lásd az ismert eltéréseket).
@@ -148,6 +154,7 @@ encoding_rs dekódolja.
 | `build_python.sh` | a Python-modul fordítása és bemásolása |
 | `src/main.rs` | `eml2str-bench` CLI |
 | `examples/prof.rs` | fázisonkénti időmérés (`cargo run --release --example prof -- ../Junk.mbox`) |
+| `tests/parser_regressions.rs` | a Pythonból átvezetett MIME-, HTML-, ICS- és RTF-javítások regressziós tesztjei (`cargo test`) |
 | `gen_fuzz.py` | fuzz-mbox generátor (`python3 gen_fuzz.py ../Junk.mbox fuzz.mbox 10000 <seed>`) |
 | `diag.py` | az eltérő levelek részeinek (ctyp / charset / cte) listázása |
 
@@ -162,6 +169,7 @@ Ha az `eml2str.py`-ben az `eml2str()`-t érintő rész változik (`parse_eml`, `
 a charset-kezelés…), a Rust oldalt is ugyanígy kell módosítani, utána ellenőrizni:
 
 ```bash
+cargo test                                          # célzott regressziós tesztek
 ./build_python.sh                                     # vagy cargo build --release
 python3 ../bench_py.py teszt.mbox py.out
 ./target/release/eml2str-bench teszt.mbox rs.out

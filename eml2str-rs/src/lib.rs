@@ -50,23 +50,30 @@ fn parse_ics(data: &[u8]) -> Result<Vec<u8>, PyErr> {
         ics.push(hdr);
     }
     fn unesc(t: &[u8]) -> Vec<u8> {
-        let t = html::replace(t, b"\\N", b"\\n");
-        let t = html::replace(&t, b"\r\n", b"\n");
-        let t = html::replace(&t, b"\\n", b"\n");
-        let t = html::replace(&t, b"\\,", b",");
-        let t = html::replace(&t, b"\\;", b";");
-        html::replace(&t, b"\\\\", b"\\")
+        let mut out = Vec::with_capacity(t.len());
+        let mut i = 0;
+        while i < t.len() {
+            if t[i] == b'\\' && i + 1 < t.len() && matches!(t[i + 1], b'\\' | b',' | b';' | b'n' | b'N') {
+                out.push(if matches!(t[i + 1], b'n' | b'N') { b'\n' } else { t[i + 1] });
+                i += 2;
+            } else if t[i] == b'\r' && t.get(i + 1) == Some(&b'\n') {
+                out.push(b'\n');
+                i += 2;
+            } else {
+                out.push(t[i]);
+                i += 1;
+            }
+        }
+        out
     }
     for x in &ics {
-        let (k, v) = match x.iter().position(|&b| b == b':') {
-            Some(c) => (&x[..c], Some(&x[c + 1..])),
-            None => (&x[..], None),
-        };
+        let Some(c) = x.iter().position(|&b| b == b':') else { continue };
+        let (k, v) = (&x[..c], &x[c + 1..]);
         if k.starts_with(b"DESCRIPTION") {
-            return Ok(unesc(v.ok_or(PyErr("IndexError"))?));
+            return Ok(unesc(v));
         }
         if k == b"X-ALT-DESC;FMTTYPE=text/html" {
-            return Ok(html::html2text(&unesc(v.ok_or(PyErr("IndexError"))?)));
+            return Ok(html::html2text(&unesc(v)));
         }
     }
     Ok(Vec::new())
@@ -123,7 +130,7 @@ pub fn decode_payload(data: &[u8], ctyp: &str, charset: Option<&str>) -> Result<
     }
 
     let mut charset = charset_name(charset.as_deref().filter(|c| !c.is_empty()).unwrap_or("iso8859-1"));
-    let is_rtf = ctyp == "application/rtf";
+    let is_rtf = matches!(ctyp, "application/rtf" | "text/rtf");
     if is_rtf {
         charset = rtf::parse_rtfhead(data, Some(&charset))?;
     }
