@@ -6,6 +6,10 @@ részek jelentenek, lásd az ismert eltéréseknél.
 
 ## Állapot
 
+- **Kevert UTF-8 felismerés, 2026-11-14:** az `is_utf8_mixed()` a Python teljes `_ACCENT_LETTERS` készletét
+  követi, az `ä`, `Ä`, `ß` betűkkel és az `n=0` esettel együtt. Ellenőrzés: 12 regressziós teszt, release build,
+  valamint 80 628 közvetlen Python–Rust összehasonlítás (az összes kétbájtos bemenet, változó küszöbök és
+  a review során talált összes eltérés): **0 eltérés**.
 - **Python-szinkron, 2026-11-14:** a hibás fejlécsorok és naptármezők kihagyása, MIME-paraméterek whitespace- és
   escape-kezelése, üres fejlécszakasz, kódolt `message/*` részek leafként kezelése, első HTML-tag felismerése,
   meta charset körüli whitespace, `text/rtf`, az RTF Unicode-helyettesítők számlálása és az ICS escape-ek

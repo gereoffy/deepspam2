@@ -462,13 +462,16 @@ pub fn decode_name(data: &[u8], name: &str, errors: Errors) -> Result<String, De
     decode(data, lookup(name).ok_or(DecodeError)?, errors)
 }
 
-/// eml2str.is_utf8_mixed(): legalabb n db utf-8 kodolt magyar ekezetes betu
+/// eml2str.is_utf8_mixed(): legalabb n db UTF-8 betupar a Python _ACCENT_LETTERS keszletebol (magyar es nemet).
 pub fn is_utf8_mixed(data: &[u8], n: usize) -> bool {
+    if n == 0 {
+        return true;
+    }
     let mut cnt = 0;
     let mut i = 0;
     while i + 1 < data.len() {
         let hit = match data[i] {
-            0xc3 => matches!(data[i + 1], 0x81 | 0x89 | 0x8d | 0x93 | 0x96 | 0x9a | 0x9c | 0xa1 | 0xa9 | 0xad | 0xb3 | 0xb6 | 0xba | 0xbc),
+            0xc3 => matches!(data[i + 1], 0x81 | 0x84 | 0x89 | 0x8d | 0x93 | 0x96 | 0x9a | 0x9c | 0x9f | 0xa1 | 0xa4 | 0xa9 | 0xad | 0xb3 | 0xb6 | 0xba | 0xbc),
             0xc5 => matches!(data[i + 1], 0x90 | 0x91 | 0xb0 | 0xb1),
             _ => false,
         };
