@@ -1199,7 +1199,9 @@ def parse_ctyp(data,hdr=b'_',ct=None):
       q+=1
       if ijel:  #  quoted string-en belul vagyunk?
 #        if c==62 or c==60: warning+="WARN! %c inside %c at %d\n"%(c,ijel,q) # < vagy > idezojelek kozott, de ez amugy okes
-        if c==ijel: ijel=None  #  idezet vege
+        if c==92 and q<len(data):  # backslash-escape: a kovetkezo karakter szo szerint
+            value.append(data[q]); q+=1
+        elif c==ijel: ijel=None  #  idezet vege
         else: value.append(c)  #  idezojelen belul kell minden whitespace is...
       elif c==59: #  ;
         if name: ct[bytes(name).lower()]=bytes(value).rstrip()
@@ -1212,7 +1214,9 @@ def parse_ctyp(data,hdr=b'_',ct=None):
         if c==34 or (c==39 and not value and name and name[-1]!=42): ijel=c
         elif value or c>32: value.append(c)  # skip initial WS
       else:     #  before the = character -> name
-        if c==61: eqsn=True #  =
+        if c==61: #  =
+            while name and name[-1]<=32: name.pop()  # az '=' elotti whitespace nem a nev resze
+            eqsn=True
         elif name or c>32: name.append(c)
     if name: ct[bytes(name).lower()]=bytes(value).rstrip()
     return ct
