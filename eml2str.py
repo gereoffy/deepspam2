@@ -1032,7 +1032,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
         data=html2text(data)     # binary version!
 
     charset=charset_name(charset or "iso8859-1")
-    if ctyp=="application/rtf":
+    if ctyp in ("application/rtf","text/rtf"):
       charset=parse_rtfhead(data,charset)  # az RTF sajat \ansicpg-je elsobbseget kap a MIME charset-tel szemben
 
     # elobb strict utf-8 (gyakran utf-8 a szoveg mas charset cimkevel), ha nem az: a deklaralt kodlap mixed modban.
@@ -1041,7 +1041,7 @@ def decode_payload(data,ctyp="text/html",charset=None):
     data=u if u is not None else safe_decode(data,charset,hint=mime_charset)  # latin1/2 + utf-8 keverek, ismeretlen kodlap: lasd safe_decode
 
     # ezt mar a dekodolas utan kell :(
-    if ctyp=="application/rtf":
+    if ctyp in ("application/rtf","text/rtf"):
         data=rtf_to_text_safe(data,rtf_hex_encoding(charset)) # remove RTF markup (striprtf, ha hibazik: durva kinyero)
     else:
         data=unescape(data)  # fix &gt; etc
