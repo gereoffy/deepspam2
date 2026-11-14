@@ -1270,7 +1270,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     for rawline in data[p:hsize].split(b'\n'):
         line=rawline.rstrip(b'\r')
         if line and line[0] in [9,32]:
-            hdr+=b' '+line.lstrip(b'\t ')
+            if hdr is not None: hdr+=b' '+line.lstrip(b'\t ')  # arva folytatosor: nincs mihez fuzni
             continue
         if hdr: headers.append(hdr)
         hdr=line
@@ -1281,6 +1281,7 @@ def parse_eml(data,debug=False,decode=False,level=0,p=0,pend=-1):
     ct={}
     for hdr in headers:
         h=hdr.split(b':',1)
+        if len(h)<2: continue  # hibas, kettospont nelkuli fejlec
 #        if debug: print(h)
         if h[0].lower()==b'content-type': parse_ctyp(h[1],b'_ct',ct)
         if h[0].lower()==b'content-disposition': parse_ctyp(h[1],b'_cd',ct)
